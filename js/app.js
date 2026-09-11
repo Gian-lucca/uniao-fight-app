@@ -15,7 +15,29 @@ const state = {
   pendentes: [],
   aprovados: [],
   alunosDoProfessor: [],
-  modalPessoa: null
+  modalPessoa: null,
+  calAno: new Date().getFullYear(),
+  calMes: new Date().getMonth(), // 0-11
+  presencas: {},          // { 'YYYY-MM-DD': {endereco, hora} }
+  presencaStatus: 'idle',  // idle | buscando | ok | erro
+  presencaMsg: '',
+
+  // --- tela de detalhe (admin clicando numa pessoa) ---
+  pessoaSelecionada: null,
+  pessoaPresencas: {},
+  pessoaCalAno: new Date().getFullYear(),
+  pessoaCalMes: new Date().getMonth(),
+  pessoaEditModalidades: [],
+  pessoaEditGraduacoes: {},
+  pessoaModoEdicao: false,
+
+  // --- tela "editar meu perfil" ---
+  editarPerfilModalidades: [],
+
+  // --- busca e filtros do painel do admin ---
+  adminBusca: '',
+  adminFiltroUnidade: '',
+  adminFiltroModalidade: ''
 };
 
 /* ---------------- HELPERS ---------------- */
@@ -43,6 +65,45 @@ function pwIsStrong(pw){ return pwChecklist(pw).every(r=>r.ok); }
 
 function go(screen){ state.screen = screen; state.error=''; render(); }
 
+function pad2(n){ return String(n).padStart(2,'0'); }
+function dataKey(ano, mes, dia){ return `${ano}-${pad2(mes+1)}-${pad2(dia)}`; }
+
+const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+function buildCalendarGeneric(ano, mes, presencasMap, actionPrev, actionNext){
+  const hoje = new Date();
+  const hojeKey = dataKey(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+
+  const primeiroDiaSemana = new Date(ano, mes, 1).getDay(); // 0=domingo
+  const totalDias = new Date(ano, mes+1, 0).getDate();
+
+  const dows = ['D','S','T','Q','Q','S','S'].map(d=>`<div class="cal-dow">${d}</div>`).join('');
+
+  let cells = '';
+  for(let i=0;i<primeiroDiaSemana;i++) cells += `<div class="cal-day empty"></div>`;
+  for(let dia=1; dia<=totalDias; dia++){
+    const key = dataKey(ano, mes, dia);
+    const presente = !!presencasMap[key];
+    const isHoje = key === hojeKey;
+    const classes = ['cal-day', presente ? 'presente':'', isHoje ? 'today':''].filter(Boolean).join(' ');
+    cells += `<div class="${classes}">${dia}</div>`;
+  }
+
+  return `
+  <div class="presenca-box">
+    <div class="cal-head">
+      <button data-action="${actionPrev}">‹</button>
+      <h3>${MESES_PT[mes]} ${ano}</h3>
+      <button data-action="${actionNext}">›</button>
+    </div>
+    <div class="cal-grid">${dows}${cells}</div>
+  </div>`;
+}
+
+function buildCalendarHTML(){
+  return buildCalendarGeneric(state.calAno, state.calMes, state.presencas, 'cal-prev', 'cal-next');
+}
+
 /* ---------------- RENDER ---------------- */
 function render(){
   const app = document.getElementById('app');
@@ -57,8 +118,10 @@ function renderScreen(){
     case 'signup': return signupView();
     case 'pending': return pendingView();
     case 'admin': return adminView();
+    case 'admin-pessoa': return adminPersonView();
     case 'student': return studentView();
     case 'teacher': return teacherView();
+    case 'editar-perfil': return editarPerfilView();
     default: return homeView();
   }
 }
@@ -71,6 +134,7 @@ function homeView(){
       <div class="badge-mark"><img src="assets/logo-uniao-fight.png" alt="União Marcelo Marinho Fight"></div>
       <h1 class="team-name">União Fight</h1>
       <div class="team-tag">BOXE · MUAY THAI · KICKBOXING<br>JIU-JITSU</div>
+      ${state.error ? `<div class="error-msg" style="text-align:left;">${state.error}</div>` : ''}
       <button class="btn btn-primary" data-action="go-login">Entrar</button>
       <button class="link-btn" data-action="go-signup">Primeiro acesso? Cadastre-se</button>
     </div>
@@ -103,7 +167,12 @@ function loginView(){
 }
 
 function signupView(){
-  const modalidadeOptions = Object.keys(GRADUACOES).map(m=>`<option value="${m}">${m}</option>`).join('');
+  const modalidadeChecks = Object.keys(GRADUACOES).map(m=>`
+    <label class="check-item">
+      <input type="checkbox" name="s-modalidade" value="${m}">
+      <span>${m}</span>
+    </label>`).join('');
+
   return `
   <div class="screen">
     <div class="back-row">
@@ -138,11 +207,8 @@ function signupView(){
       </select>
     </div>
     <div class="field">
-      <label>Modalidade</label>
-      <select id="s-modalidade">
-        <option value="">Selecione</option>
-        ${modalidadeOptions}
-      </select>
+      <label>Modalidade(s)</label>
+      <div class="check-list">${modalidadeChecks}</div>
     </div>
     <div class="field">
       <label>Você é</label>
@@ -172,25 +238,79 @@ function pendingView(){
   </div>`;
 }
 
+function aprovadosFiltrados(){
+  const termo = state.adminBusca.trim().toLowerCase();
+  return state.aprovados.filter(u=>{
+    const matchNome = !termo || u.nome.toLowerCase().includes(termo);
+    const matchUnidade = !state.adminFiltroUnidade || u.unidade === state.adminFiltroUnidade;
+    const matchModalidade = !state.adminFiltroModalidade || (u.modalidades||[]).includes(state.adminFiltroModalidade);
+    return matchNome && matchUnidade && matchModalidade;
+  });
+}
+
+function renderEquipeAprovada(){
+  const approved = aprovadosFiltrados();
+  const UNIDADES = state.adminFiltroUnidade ? [state.adminFiltroUnidade] : ['Anchieta','Ricardo'];
+  const MODALIDADES = state.adminFiltroModalidade ? [state.adminFiltroModalidade] : Object.keys(GRADUACOES);
+
+  const gruposHtml = UNIDADES.map(unidade=>{
+    const daUnidade = approved.filter(u=>u.unidade===unidade);
+    if(!daUnidade.length) return '';
+
+    const modalidadesHtml = MODALIDADES.map(mod=>{
+      const doGrupo = daUnidade.filter(u=>(u.modalidades||[]).includes(mod));
+      if(!doGrupo.length) return '';
+      const linhas = doGrupo.map(u=>`
+        <div class="stud-row clickable" data-action="abrir-pessoa" data-id="${u.id}">
+          <div>${u.nome}<div class="sm">${u.papel === 'aluno' ? 'Aluno' : 'Professor'}</div></div>
+          <div class="sm">${(u.graduacoes && u.graduacoes[mod]) || '—'}</div>
+        </div>`).join('');
+      return `
+        <div class="modalidade-group">
+          <div class="modalidade-label">${mod}</div>
+          ${linhas}
+        </div>`;
+    }).join('');
+
+    if(!modalidadesHtml.trim()) return '';
+
+    return `
+      <div class="unidade-group">
+        <div class="unidade-label">Unidade ${unidade}</div>
+        ${modalidadesHtml}
+      </div>`;
+  }).join('');
+
+  if(gruposHtml.trim()) return gruposHtml;
+  const temFiltro = state.adminBusca.trim() || state.adminFiltroUnidade || state.adminFiltroModalidade;
+  return `<div class="empty-note">${temFiltro ? 'Nenhum resultado encontrado.' : 'Ninguém aprovado ainda.'}</div>`;
+}
+
+// Atualiza só a lista de "equipe aprovada" (sem redesenhar a tela toda),
+// pra não tirar o foco do campo de busca enquanto a pessoa digita
+function atualizarEquipeAprovada(){
+  const container = document.getElementById('equipe-aprovada-container');
+  if(!container) return;
+  container.innerHTML = renderEquipeAprovada();
+  container.querySelectorAll('[data-action]').forEach(el=>{
+    el.addEventListener('click', ()=>{
+      handleAction(el.dataset.action, el.dataset.id || null);
+    });
+  });
+}
+
 function adminView(){
   const pend = state.pendentes;
-  const approved = state.aprovados;
 
   const pendItems = pend.length ? pend.map(u=>`
     <div class="req-item">
       <div class="rn">${u.nome}</div>
-      <div class="rm">${u.papel === 'aluno' ? 'Aluno' : 'Professor'} · ${u.modalidade} · Unidade ${u.unidade}</div>
+      <div class="rm">${u.papel === 'aluno' ? 'Aluno' : 'Professor'} · ${(u.modalidades||[]).join(', ')} · Unidade ${u.unidade}</div>
       <div class="req-actions">
         <button class="btn-approve" data-action="open-approve" data-id="${u.id}">Aprovar</button>
         <button class="btn-reject" data-action="reject" data-id="${u.id}">Recusar</button>
       </div>
     </div>`).join('') : `<div class="empty-note">Nenhuma solicitação pendente.</div>`;
-
-  const approvedItems = approved.length ? approved.map(u=>`
-    <div class="stud-row">
-      <div>${u.nome}<div class="sm">${u.papel === 'aluno' ? 'Aluno' : 'Professor'} · ${u.modalidade} · ${u.unidade}</div></div>
-      <div class="sm">${u.graduacao || '—'}</div>
-    </div>`).join('') : `<div class="empty-note">Ninguém aprovado ainda.</div>`;
 
   return `
   <div class="screen">
@@ -200,8 +320,23 @@ function adminView(){
     </div>
     <div class="section-label">Solicitações pendentes (${pend.length})</div>
     ${pendItems}
-    <div class="section-label">Equipe aprovada</div>
-    ${approvedItems}
+
+    <div class="section-label">Equipes</div>
+    <div class="admin-filtros">
+      <input id="admin-busca" type="text" placeholder="Buscar por nome..." value="${state.adminBusca}">
+      <div class="admin-filtros-row">
+        <select id="admin-filtro-unidade">
+          <option value="">Todas as unidades</option>
+          <option value="Anchieta" ${state.adminFiltroUnidade==='Anchieta'?'selected':''}>Anchieta</option>
+          <option value="Ricardo" ${state.adminFiltroUnidade==='Ricardo'?'selected':''}>Ricardo</option>
+        </select>
+        <select id="admin-filtro-modalidade">
+          <option value="">Todas as modalidades</option>
+          ${Object.keys(GRADUACOES).map(m=>`<option value="${m}" ${state.adminFiltroModalidade===m?'selected':''}>${m}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div id="equipe-aprovada-container">${renderEquipeAprovada()}</div>
   </div>
   ${modalView()}`;
 }
@@ -209,16 +344,21 @@ function adminView(){
 function modalView(){
   if(!state.modalUserId || !state.modalPessoa) return '';
   const u = state.modalPessoa;
-  const opts = (GRADUACOES[u.modalidade] || []).map(g=>`<option value="${g}">${g}</option>`).join('');
+  const selects = (u.modalidades || []).map(m=>{
+    const opts = (GRADUACOES[m] || []).map(g=>`<option value="${g}">${g}</option>`).join('');
+    return `
+      <div class="field">
+        <label>Graduação · ${m}</label>
+        <select class="grad-select" data-modalidade="${m}">${opts}</select>
+      </div>`;
+  }).join('');
+
   return `
   <div class="modal-overlay">
     <div class="modal-box">
       <h3>Definir graduação</h3>
-      <p>${u.nome} · ${u.modalidade}</p>
-      <div class="field">
-        <label>Graduação</label>
-        <select id="grad-select">${opts}</select>
-      </div>
+      <p>${u.nome} · ${(u.modalidades || []).join(', ')}</p>
+      ${selects}
       <div class="modal-actions">
         <button class="btn-reject" data-action="close-modal">Cancelar</button>
         <button class="btn-approve" data-action="confirm-approve" data-id="${u.id}">Confirmar</button>
@@ -227,8 +367,146 @@ function modalView(){
   </div>`;
 }
 
+function adminPersonView(){
+  const p = state.pessoaSelecionada;
+  if(!p) return `<div class="screen"><div class="empty-note">Pessoa não encontrada.</div></div>`;
+
+  // presença: total + lista recente + calendário navegável
+  const registros = Object.values(state.pessoaPresencas).sort((a,b)=> b.data.localeCompare(a.data));
+  const listaPresenca = registros.length ? registros.slice(0,15).map(r=>`
+    <div class="stud-row">
+      <div>${r.data.split('-').reverse().join('/')}<div class="sm">${r.modalidade || ''}</div></div>
+      <div class="sm" style="max-width:170px; text-align:right;">${r.endereco || '—'}</div>
+    </div>`).join('') : `<div class="empty-note">Nenhuma presença registrada ainda.</div>`;
+
+  const presencaSection = `
+    <div class="section-label" style="margin-top:24px;">Presença (${registros.length} no total)</div>
+    ${buildCalendarGeneric(state.pessoaCalAno, state.pessoaCalMes, state.pessoaPresencas, 'pessoa-cal-prev', 'pessoa-cal-next')}
+    ${listaPresenca}`;
+
+  if(!state.pessoaModoEdicao){
+    const gradBadges = (p.modalidades || []).map(m=>`
+      <div class="grad-tag">${m.toUpperCase()}: ${(p.graduacoes && p.graduacoes[m]) || 'a definir'}</div>
+    `).join('');
+
+    return `
+    <div class="screen">
+      <div class="back-row">
+        <button data-action="voltar-admin">←</button>
+        <h2>${p.nome}</h2>
+      </div>
+      <div class="profile-card">
+        <div class="profile-name">${p.nome}</div>
+        <div class="profile-meta">
+          ${p.papel === 'aluno' ? 'Aluno' : p.papel === 'professor' ? 'Professor' : 'Administrador'} · Unidade ${p.unidade || '—'}<br>
+          Modalidades: ${(p.modalidades || []).join(', ') || '—'}
+        </div>
+        <div class="grad-tags-wrap">${gradBadges}</div>
+      </div>
+      <button class="btn btn-ghost" data-action="editar-pessoa" style="margin-bottom:6px;">Editar dados</button>
+      ${presencaSection}
+    </div>`;
+  }
+
+  // ---- modo de edição ----
+  const modalidadeChecks = Object.keys(GRADUACOES).map(m=>`
+    <label class="check-item">
+      <input type="checkbox" name="pessoa-modalidade" value="${m}" ${state.pessoaEditModalidades.includes(m) ? 'checked' : ''}>
+      <span>${m}</span>
+    </label>`).join('');
+
+  const graduacaoSelects = state.pessoaEditModalidades.map(m=>{
+    const opts = (GRADUACOES[m] || []).map(g=>{
+      const sel = state.pessoaEditGraduacoes[m] === g ? 'selected' : '';
+      return `<option value="${g}" ${sel}>${g}</option>`;
+    }).join('');
+    return `
+      <div class="field">
+        <label>Graduação · ${m}</label>
+        <select class="pessoa-grad-select" data-modalidade="${m}">${opts}</select>
+      </div>`;
+  }).join('');
+
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="cancelar-editar-pessoa">←</button>
+      <h2>Editar · ${p.nome}</h2>
+    </div>
+    ${state.error ? `<div class="error-msg">${state.error}</div>` : ''}
+
+    <div class="field">
+      <label>Nome completo</label>
+      <input id="pessoa-nome" type="text" value="${p.nome}">
+    </div>
+    <div class="field">
+      <label>Data de nascimento</label>
+      <input id="pessoa-nasc" type="date" value="${p.data_nascimento || ''}">
+    </div>
+    <div class="field">
+      <label>Unidade</label>
+      <select id="pessoa-unidade">
+        <option value="Anchieta" ${p.unidade==='Anchieta'?'selected':''}>Anchieta</option>
+        <option value="Ricardo" ${p.unidade==='Ricardo'?'selected':''}>Ricardo</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Modalidade(s)</label>
+      <div class="check-list">${modalidadeChecks}</div>
+    </div>
+    ${graduacaoSelects}
+    <div class="field">
+      <label>Papel</label>
+      <select id="pessoa-papel">
+        <option value="aluno" ${p.papel==='aluno'?'selected':''}>Aluno</option>
+        <option value="professor" ${p.papel==='professor'?'selected':''}>Professor</option>
+        <option value="administrador" ${p.papel==='administrador'?'selected':''}>Administrador</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Status</label>
+      <select id="pessoa-status">
+        <option value="pendente" ${p.status==='pendente'?'selected':''}>Pendente</option>
+        <option value="aprovado" ${p.status==='aprovado'?'selected':''}>Aprovado</option>
+        <option value="recusado" ${p.status==='recusado'?'selected':''}>Recusado</option>
+      </select>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button class="btn btn-ghost" data-action="cancelar-editar-pessoa" style="flex:1;">Cancelar</button>
+      <button class="btn btn-primary" data-action="salvar-pessoa" data-id="${p.id}" style="flex:1;">Salvar</button>
+    </div>
+  </div>`;
+}
+
 function studentView(){
   const u = state.currentUser;
+  const modalidades = u.modalidades || [];
+
+  const gradBadges = modalidades.map(m=>`
+    <div class="grad-tag">${m}: ${(u.graduacoes && u.graduacoes[m]) || 'a definir'}</div>
+  `).join('');
+
+  let statusHtml = '';
+  if(state.presencaStatus === 'buscando'){
+    statusHtml = `<div class="presenca-status">Buscando sua localização...</div>`;
+  } else if(state.presencaStatus === 'ok'){
+    statusHtml = `<div class="presenca-status ok">Presença registrada!<div class="presenca-endereco">${state.presencaMsg}</div></div>`;
+  } else if(state.presencaStatus === 'erro'){
+    statusHtml = `<div class="presenca-status erro">${state.presencaMsg}</div>`;
+  }
+
+  const hoje = new Date();
+  const hojeKey = dataKey(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  const jaRegistrouHoje = !!state.presencas[hojeKey];
+
+  const seletorModalidade = modalidades.length > 1 ? `
+    <div class="field">
+      <label>Modalidade de hoje</label>
+      <select id="presenca-modalidade">
+        ${modalidades.map(m=>`<option value="${m}">${m}</option>`).join('')}
+      </select>
+    </div>` : '';
+
   return `
   <div class="screen">
     <div class="top-bar">
@@ -239,11 +517,19 @@ function studentView(){
       <div class="profile-name">${u.nome}</div>
       <div class="profile-meta">
         Aluno · Unidade ${u.unidade}<br>
-        Modalidade: ${u.modalidade}
+        Modalidades: ${modalidades.join(', ')}
       </div>
-      <div class="grad-tag">${u.graduacao || 'Graduação a definir'}</div>
+      <div class="grad-tags-wrap">${gradBadges}</div>
     </div>
-    <div class="empty-note">Em breve: treinos, avisos da equipe e histórico de graduação aparecerão aqui.</div>
+    <button class="btn btn-ghost" data-action="go-editar-perfil" style="margin-bottom:18px;">Editar perfil</button>
+
+    ${buildCalendarHTML()}
+
+    ${seletorModalidade}
+    <button class="btn-presenca" data-action="registrar-presenca" ${jaRegistrouHoje || state.presencaStatus==='buscando' ? 'disabled' : ''}>
+      ${jaRegistrouHoje ? 'Presença já registrada hoje' : 'Registrar presença'}
+    </button>
+    ${statusHtml}
   </div>`;
 }
 
@@ -252,8 +538,8 @@ function teacherView(){
   const alunos = state.alunosDoProfessor;
   const alunosItems = alunos.length ? alunos.map(a=>`
     <div class="stud-row">
-      <div>${a.nome}</div>
-      <div class="sm">${a.graduacao || '—'}</div>
+      <div>${a.nome}<div class="sm">${(a.modalidades||[]).join(', ')}</div></div>
+      <div class="sm">${(a.modalidades||[]).map(m=>(a.graduacoes && a.graduacoes[m]) || '—').join(' · ')}</div>
     </div>`).join('') : `<div class="empty-note">Nenhum aluno nesta modalidade/unidade ainda.</div>`;
 
   return `
@@ -264,10 +550,52 @@ function teacherView(){
     </div>
     <div class="profile-card">
       <div class="profile-name">${u.nome}</div>
-      <div class="profile-meta">Professor · ${u.modalidade} · Unidade ${u.unidade}</div>
+      <div class="profile-meta">Professor · ${(u.modalidades||[]).join(', ')} · Unidade ${u.unidade}</div>
     </div>
+    <button class="btn btn-ghost" data-action="go-editar-perfil" style="margin-bottom:18px;">Editar perfil</button>
     <div class="section-label">Seus alunos</div>
     ${alunosItems}
+  </div>`;
+}
+
+function editarPerfilView(){
+  const u = state.currentUser;
+  const modalidadeChecks = Object.keys(GRADUACOES).map(m=>`
+    <label class="check-item">
+      <input type="checkbox" name="editar-modalidade" value="${m}" ${state.editarPerfilModalidades.includes(m) ? 'checked' : ''}>
+      <span>${m}</span>
+    </label>`).join('');
+
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="voltar-editar-perfil">←</button>
+      <h2>Editar perfil</h2>
+    </div>
+    ${state.error ? `<div class="error-msg">${state.error}</div>` : ''}
+    <div class="field">
+      <label>Nome completo</label>
+      <input id="editar-nome" type="text" value="${u.nome}">
+    </div>
+    <div class="field">
+      <label>Data de nascimento</label>
+      <input id="editar-nasc" type="date" value="${u.data_nascimento || ''}">
+    </div>
+    <div class="field">
+      <label>Unidade</label>
+      <select id="editar-unidade">
+        <option value="Anchieta" ${u.unidade==='Anchieta'?'selected':''}>Anchieta</option>
+        <option value="Ricardo" ${u.unidade==='Ricardo'?'selected':''}>Ricardo</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Modalidade(s)</label>
+      <div class="check-list">${modalidadeChecks}</div>
+    </div>
+    <div class="empty-note" style="margin-bottom:16px;">Papel, status e graduação só podem ser alterados pelo administrador.</div>
+    <button class="btn btn-primary" data-action="salvar-meu-perfil" ${state.loading ? 'disabled' : ''}>
+      ${state.loading ? 'Salvando...' : 'Salvar alterações'}
+    </button>
   </div>`;
 }
 
@@ -289,9 +617,117 @@ async function carregarAlunosDoProfessor(){
   const { data } = await supabaseClient
     .from('profiles').select('*')
     .eq('papel', 'aluno').eq('status', 'aprovado')
-    .eq('unidade', u.unidade).eq('modalidade', u.modalidade);
+    .eq('unidade', u.unidade)
+    .overlaps('modalidades', u.modalidades || []);
   state.alunosDoProfessor = data || [];
   render();
+}
+
+async function carregarPresencasDoMes(){
+  const u = state.currentUser;
+  const ano = state.calAno, mes = state.calMes;
+  const inicio = `${ano}-${pad2(mes+1)}-01`;
+  const fim = `${ano}-${pad2(mes+1)}-${pad2(new Date(ano, mes+1, 0).getDate())}`;
+
+  const { data } = await supabaseClient
+    .from('presencas').select('*')
+    .eq('aluno_id', u.id)
+    .gte('data', inicio).lte('data', fim);
+
+  const mapa = {};
+  (data || []).forEach(p => { mapa[p.data] = p; });
+  state.presencas = mapa;
+  render();
+}
+
+async function abrirPessoa(id){
+  const pessoa = state.aprovados.find(u=>u.id===id) || state.pendentes.find(u=>u.id===id);
+  if(!pessoa) return;
+
+  state.pessoaSelecionada = pessoa;
+  state.pessoaEditModalidades = [...(pessoa.modalidades || [])];
+  state.pessoaEditGraduacoes = { ...(pessoa.graduacoes || {}) };
+  state.pessoaCalAno = new Date().getFullYear();
+  state.pessoaCalMes = new Date().getMonth();
+  state.pessoaModoEdicao = false;
+  state.error = '';
+
+  const { data } = await supabaseClient
+    .from('presencas').select('*').eq('aluno_id', id);
+  const mapa = {};
+  (data || []).forEach(p => { mapa[p.data] = p; });
+  state.pessoaPresencas = mapa;
+
+  go('admin-pessoa');
+}
+
+// Reverse geocoding gratuito via OpenStreetMap Nominatim.
+// Obs: serviço público com limite de uso; para volumes maiores de alunos,
+// considere trocar por uma API paga (Google Geocoding, Mapbox etc).
+async function buscarEndereco(lat, lon){
+  const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`;
+  const resp = await fetch(url, { headers: { 'Accept-Language': 'pt-BR' } });
+  if(!resp.ok) throw new Error('Não foi possível identificar o endereço.');
+  const data = await resp.json();
+  return data.display_name || `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+}
+
+function obterLocalizacao(){
+  return new Promise((resolve, reject)=>{
+    if(!navigator.geolocation){ reject(new Error('Seu navegador não suporta localização.')); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve(pos.coords),
+      err => reject(new Error('Não foi possível acessar o GPS. Verifique se a permissão de localização está ativada.')),
+      { enableHighAccuracy: true, timeout: 15000 }
+    );
+  });
+}
+
+async function registrarPresenca(){
+  const u = state.currentUser;
+  const modalidades = u.modalidades || [];
+  const seletor = document.getElementById('presenca-modalidade');
+  const modalidadeEscolhida = seletor ? seletor.value : (modalidades[0] || null);
+
+  state.presencaStatus = 'buscando';
+  state.presencaMsg = '';
+  render();
+
+  try{
+    const coords = await obterLocalizacao();
+    const endereco = await buscarEndereco(coords.latitude, coords.longitude);
+    const hoje = new Date();
+    const hojeStr = `${hoje.getFullYear()}-${pad2(hoje.getMonth()+1)}-${pad2(hoje.getDate())}`;
+
+    const { error } = await supabaseClient.from('presencas').insert({
+      aluno_id: u.id,
+      data: hojeStr,
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      endereco,
+      unidade: u.unidade,
+      modalidade: modalidadeEscolhida
+    });
+
+    if(error){
+      if(error.code === '23505'){
+        state.presencaStatus = 'erro';
+        state.presencaMsg = 'Você já registrou presença hoje.';
+      } else {
+        state.presencaStatus = 'erro';
+        state.presencaMsg = 'Erro ao salvar presença: ' + error.message;
+      }
+      return render();
+    }
+
+    state.presencaStatus = 'ok';
+    state.presencaMsg = endereco;
+    await carregarPresencasDoMes();
+  } catch(err){
+    state.presencaStatus = 'erro';
+    state.presencaMsg = err.message;
+    render();
+  }
 }
 
 /* ---------------- ACTIONS ---------------- */
@@ -323,6 +759,44 @@ function attachHandlers(){
     pw.addEventListener('input', updatePw);
     pw2.addEventListener('input', updateMatch);
     updatePw();
+  }
+
+  // Na tela de detalhe do admin: ao marcar/desmarcar uma modalidade,
+  // guarda as graduações já escolhidas antes de re-renderizar o formulário
+  app.querySelectorAll('input[name="pessoa-modalidade"]').forEach(chk=>{
+    chk.addEventListener('change', ()=>{
+      document.querySelectorAll('.pessoa-grad-select').forEach(sel=>{
+        state.pessoaEditGraduacoes[sel.dataset.modalidade] = sel.value;
+      });
+      state.pessoaEditModalidades = Array.from(
+        document.querySelectorAll('input[name="pessoa-modalidade"]:checked')
+      ).map(el=>el.value);
+      render();
+    });
+  });
+
+  // Busca e filtros do painel do admin: atualiza só a lista, sem redesenhar
+  // a tela toda (senão o campo de busca perde o foco a cada letra digitada)
+  const buscaInput = document.getElementById('admin-busca');
+  if(buscaInput){
+    buscaInput.addEventListener('input', ()=>{
+      state.adminBusca = buscaInput.value;
+      atualizarEquipeAprovada();
+    });
+  }
+  const filtroUnidade = document.getElementById('admin-filtro-unidade');
+  if(filtroUnidade){
+    filtroUnidade.addEventListener('change', ()=>{
+      state.adminFiltroUnidade = filtroUnidade.value;
+      atualizarEquipeAprovada();
+    });
+  }
+  const filtroModalidade = document.getElementById('admin-filtro-modalidade');
+  if(filtroModalidade){
+    filtroModalidade.addEventListener('change', ()=>{
+      state.adminFiltroModalidade = filtroModalidade.value;
+      atualizarEquipeAprovada();
+    });
   }
 }
 
@@ -365,6 +839,7 @@ async function handleAction(action, id){
     state.currentUser = perfil;
     if(perfil.papel==='administrador'){ await carregarPainelAdmin(); return go('admin'); }
     if(perfil.papel==='professor'){ await carregarAlunosDoProfessor(); return go('teacher'); }
+    await carregarPresencasDoMes();
     return go('student');
   }
 
@@ -374,10 +849,10 @@ async function handleAction(action, id){
     const senha = document.getElementById('s-senha').value;
     const senha2 = document.getElementById('s-senha2').value;
     const unidade = document.getElementById('s-unidade').value;
-    const modalidade = document.getElementById('s-modalidade').value;
+    const modalidades = Array.from(document.querySelectorAll('input[name="s-modalidade"]:checked')).map(el=>el.value);
     const papel = document.getElementById('s-papel').value;
 
-    if(!nome || !nasc || !unidade || !modalidade || !papel){ state.error='Preencha todos os campos.'; return render(); }
+    if(!nome || !nasc || !unidade || modalidades.length===0 || !papel){ state.error='Preencha todos os campos e selecione ao menos uma modalidade.'; return render(); }
     if(!pwIsStrong(senha)){ state.error='A senha ainda não atende aos requisitos de senha forte.'; return render(); }
     if(senha !== senha2){ state.error='As senhas não coincidem.'; return render(); }
 
@@ -395,7 +870,7 @@ async function handleAction(action, id){
 
     const { error: perfilError } = await supabaseClient.from('profiles').insert({
       id: data.user.id,
-      nome, data_nascimento: nasc, unidade, modalidade, papel,
+      nome, data_nascimento: nasc, unidade, modalidades, papel,
       status: 'pendente'
     });
 
@@ -411,8 +886,11 @@ async function handleAction(action, id){
   if(action==='close-modal'){ state.modalUserId=null; state.modalPessoa=null; return render(); }
 
   if(action==='confirm-approve'){
-    const grad = document.getElementById('grad-select').value;
-    await supabaseClient.from('profiles').update({ status:'aprovado', graduacao: grad }).eq('id', id);
+    const graduacoes = {};
+    document.querySelectorAll('.grad-select').forEach(sel=>{
+      graduacoes[sel.dataset.modalidade] = sel.value;
+    });
+    await supabaseClient.from('profiles').update({ status:'aprovado', graduacoes }).eq('id', id);
     state.modalUserId = null; state.modalPessoa = null;
     return carregarPainelAdmin();
   }
@@ -421,22 +899,147 @@ async function handleAction(action, id){
     await supabaseClient.from('profiles').update({ status:'recusado' }).eq('id', id);
     return carregarPainelAdmin();
   }
+
+  if(action==='cal-prev'){
+    state.calMes -= 1;
+    if(state.calMes < 0){ state.calMes = 11; state.calAno -= 1; }
+    return carregarPresencasDoMes();
+  }
+
+  if(action==='cal-next'){
+    state.calMes += 1;
+    if(state.calMes > 11){ state.calMes = 0; state.calAno += 1; }
+    return carregarPresencasDoMes();
+  }
+
+  if(action==='registrar-presenca'){
+    return registrarPresenca();
+  }
+
+  if(action==='abrir-pessoa'){
+    return abrirPessoa(id);
+  }
+
+  if(action==='voltar-admin'){
+    state.pessoaSelecionada = null;
+    await carregarPainelAdmin();
+    return go('admin');
+  }
+
+  if(action==='pessoa-cal-prev'){
+    state.pessoaCalMes -= 1;
+    if(state.pessoaCalMes < 0){ state.pessoaCalMes = 11; state.pessoaCalAno -= 1; }
+    return render();
+  }
+
+  if(action==='pessoa-cal-next'){
+    state.pessoaCalMes += 1;
+    if(state.pessoaCalMes > 11){ state.pessoaCalMes = 0; state.pessoaCalAno += 1; }
+    return render();
+  }
+
+  if(action==='editar-pessoa'){
+    state.pessoaModoEdicao = true;
+    return render();
+  }
+
+  if(action==='cancelar-editar-pessoa'){
+    const p = state.pessoaSelecionada;
+    state.pessoaEditModalidades = [...(p.modalidades || [])];
+    state.pessoaEditGraduacoes = { ...(p.graduacoes || {}) };
+    state.pessoaModoEdicao = false;
+    state.error = '';
+    return render();
+  }
+
+  if(action==='salvar-pessoa'){
+    const nome = document.getElementById('pessoa-nome').value.trim();
+    const nasc = document.getElementById('pessoa-nasc').value;
+    const unidade = document.getElementById('pessoa-unidade').value;
+    const papel = document.getElementById('pessoa-papel').value;
+    const status = document.getElementById('pessoa-status').value;
+    const modalidades = Array.from(document.querySelectorAll('input[name="pessoa-modalidade"]:checked')).map(el=>el.value);
+    const graduacoes = {};
+    document.querySelectorAll('.pessoa-grad-select').forEach(sel=>{
+      graduacoes[sel.dataset.modalidade] = sel.value;
+    });
+
+    if(!nome || !unidade || modalidades.length===0){ state.error='Preencha nome, unidade e ao menos uma modalidade.'; return render(); }
+
+    const { data: atualizado, error } = await supabaseClient.from('profiles').update({
+      nome, data_nascimento: nasc || null, unidade, modalidades, papel, status, graduacoes
+    }).eq('id', id).select().single();
+
+    if(error){ state.error = 'Erro ao salvar: ' + error.message; return render(); }
+
+    state.pessoaSelecionada = atualizado;
+    state.pessoaEditModalidades = [...(atualizado.modalidades || [])];
+    state.pessoaEditGraduacoes = { ...(atualizado.graduacoes || {}) };
+    state.pessoaModoEdicao = false;
+    state.error = '';
+    return render();
+  }
+
+  if(action==='go-editar-perfil'){
+    state.editarPerfilModalidades = [...(state.currentUser.modalidades || [])];
+    return go('editar-perfil');
+  }
+
+  if(action==='voltar-editar-perfil'){
+    return go(state.currentUser.papel === 'professor' ? 'teacher' : 'student');
+  }
+
+  if(action==='salvar-meu-perfil'){
+    const nome = document.getElementById('editar-nome').value.trim();
+    const nasc = document.getElementById('editar-nasc').value;
+    const unidade = document.getElementById('editar-unidade').value;
+    const modalidades = Array.from(document.querySelectorAll('input[name="editar-modalidade"]:checked')).map(el=>el.value);
+
+    if(!nome || !unidade || modalidades.length===0){ state.error='Preencha nome, unidade e ao menos uma modalidade.'; return render(); }
+
+    state.loading = true; render();
+    const { error } = await supabaseClient.rpc('atualizar_meu_perfil', {
+      novo_nome: nome,
+      nova_data_nascimento: nasc || null,
+      nova_unidade: unidade,
+      novas_modalidades: modalidades
+    });
+    state.loading = false;
+
+    if(error){ state.error = 'Erro ao salvar: ' + error.message; return render(); }
+
+    const { data: perfilAtualizado } = await supabaseClient
+      .from('profiles').select('*').eq('id', state.currentUser.id).single();
+    state.currentUser = perfilAtualizado;
+
+    return go(state.currentUser.papel === 'professor' ? 'teacher' : 'student');
+  }
 }
 
 /* ---------------- BOOT ---------------- */
-// Se já existir uma sessão salva no navegador, tenta reconectar direto no painel certo
+// Se já existir uma sessão salva no navegador, tenta reconectar direto no painel certo.
+// Envolvido em try/catch para nunca deixar a tela em branco, mesmo se a conexão falhar.
 (async function boot(){
-  const { data: { session } } = await supabaseClient.auth.getSession();
-  if(!session){ render(); return; }
+  try{
+    const { data: { session }, error: sessionError } = await supabaseClient.auth.getSession();
+    if(sessionError) throw sessionError;
+    if(!session){ render(); return; }
 
-  const { data: perfil } = await supabaseClient
-    .from('profiles').select('*').eq('id', session.user.id).single();
+    const { data: perfil, error: perfilError } = await supabaseClient
+      .from('profiles').select('*').eq('id', session.user.id).single();
+    if(perfilError) throw perfilError;
 
-  if(!perfil || perfil.status !== 'aprovado'){ render(); return; }
+    if(!perfil || perfil.status !== 'aprovado'){ render(); return; }
 
-  state.currentUser = perfil;
-  if(perfil.papel==='administrador'){ await carregarPainelAdmin(); state.screen='admin'; }
-  else if(perfil.papel==='professor'){ await carregarAlunosDoProfessor(); state.screen='teacher'; }
-  else { state.screen='student'; }
-  render();
+    state.currentUser = perfil;
+    if(perfil.papel==='administrador'){ await carregarPainelAdmin(); state.screen='admin'; }
+    else if(perfil.papel==='professor'){ await carregarAlunosDoProfessor(); state.screen='teacher'; }
+    else { await carregarPresencasDoMes(); state.screen='student'; }
+    render();
+  } catch(err){
+    console.error('Erro ao iniciar o app:', err);
+    state.error = 'Não foi possível conectar ao servidor. Verifique a URL e a chave em supabaseClient.js.';
+    state.screen = 'home';
+    render();
+  }
 })();

@@ -153,6 +153,46 @@
 
   .section-label{ font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; margin:18px 0 10px; }
 
+  /* ---------- CHECKBOXES DE MODALIDADE ---------- */
+  .check-list{ display:flex; flex-direction:column; gap:8px; }
+  .check-item{
+    display:flex; align-items:center; gap:10px;
+    background:var(--panel-2); border:1px solid var(--line); padding:10px 12px;
+    cursor:pointer; font-size:13.5px;
+  }
+  .check-item:has(input:checked){ border-color:var(--yellow); color:var(--yellow); }
+  .check-item input{ accent-color:var(--yellow); width:16px; height:16px; }
+
+  /* ---------- BADGES DE GRADUAÇÃO (várias modalidades) ---------- */
+  .grad-tags-wrap{ display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+  .grad-tags-wrap .grad-tag{ margin-top:0; }
+
+  /* ---------- AGRUPAMENTO DO PAINEL ADMIN ---------- */
+  /* ---------- BUSCA E FILTROS DO ADMIN ---------- */
+  .admin-filtros{ margin-bottom:16px; }
+  .admin-filtros input{
+    width:100%; padding:11px 12px; background:var(--panel-2);
+    border:1px solid var(--line); color:var(--text); font-family:'Inter'; font-size:14px;
+    margin-bottom:8px;
+  }
+  .admin-filtros input:focus{ outline:none; border-color:var(--yellow); }
+  .admin-filtros-row{ display:flex; gap:8px; }
+  .admin-filtros-row select{
+    flex:1; padding:9px 10px; background:var(--panel-2);
+    border:1px solid var(--line); color:var(--muted); font-family:'Inter'; font-size:12.5px;
+  }
+  .admin-filtros-row select:focus{ outline:none; border-color:var(--yellow); color:var(--text); }
+
+  .unidade-group{ margin-bottom:18px; }
+  .unidade-label{
+    font-family:'Oswald'; font-size:15px; text-transform:uppercase; letter-spacing:.03em;
+    color:var(--yellow); padding-bottom:6px; margin-bottom:10px; border-bottom:1px solid var(--line);
+  }
+  .modalidade-group{ margin-bottom:12px; margin-left:8px; }
+  .modalidade-label{
+    font-size:11.5px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:6px;
+  }
+
   .req-item{
     background:var(--panel-2); border:1px solid var(--line); padding:13px 14px; margin-bottom:10px;
   }
@@ -168,11 +208,59 @@
 
   .empty-note{ font-size:13px; color:var(--muted); padding:14px; border:1px dashed var(--line); text-align:center; }
 
+  /* ---------- PRESENÇA / CALENDÁRIO ---------- */
+  .presenca-box{ margin-top:22px; }
+  .cal-head{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:12px;
+  }
+  .cal-head h3{ font-size:14px; text-transform:uppercase; letter-spacing:.04em; }
+  .cal-head button{
+    background:none; border:1px solid var(--line); color:var(--muted);
+    width:28px; height:28px; cursor:pointer; font-size:14px;
+  }
+  .cal-head button:hover{ border-color:var(--yellow); color:var(--yellow); }
+  .cal-grid{
+    display:grid; grid-template-columns:repeat(7,1fr); gap:4px; margin-bottom:16px;
+  }
+  .cal-dow{ text-align:center; font-size:10.5px; color:var(--muted); text-transform:uppercase; padding-bottom:4px; }
+  .cal-day{
+    aspect-ratio:1; display:flex; align-items:center; justify-content:center;
+    font-size:12.5px; color:var(--text); background:var(--panel-2);
+    border:1px solid var(--line); position:relative;
+  }
+  .cal-day.empty{ background:transparent; border:none; }
+  .cal-day.today{ border-color:var(--yellow); }
+  .cal-day.presente{ background: rgba(247,181,0,.18); border-color:var(--yellow); color:var(--yellow); font-weight:600; }
+  .cal-day.presente:after{
+    content:''; position:absolute; bottom:3px; width:4px; height:4px; border-radius:50%;
+    background:var(--yellow);
+  }
+
+  .btn-presenca{
+    width:100%; padding:14px 16px; border:none; cursor:pointer;
+    font-family:'Oswald'; font-weight:600; font-size:14px; letter-spacing:.03em;
+    text-transform:uppercase; background: linear-gradient(180deg, #ffd24d, var(--yellow)); color:#171100;
+  }
+  .btn-presenca:disabled{ background:var(--panel-2); color:var(--muted); cursor:default; }
+  .btn-presenca:hover:not(:disabled){ background:var(--yellow-deep); }
+
+  .presenca-status{
+    font-size:12px; color:var(--muted); margin-top:10px; text-align:center; line-height:1.5;
+  }
+  .presenca-status.ok{ color:var(--green); }
+  .presenca-status.erro{ color:#f2b6bf; }
+  .presenca-endereco{
+    font-size:11.5px; color:var(--muted); margin-top:4px; font-style:italic;
+  }
+
   .stud-row{
     display:flex; justify-content:space-between; align-items:center;
     padding:11px 0; border-bottom:1px solid var(--line); font-size:13.5px;
   }
   .stud-row .sm{ color:var(--muted); font-size:11.5px; }
+  .stud-row.clickable{ cursor:pointer; }
+  .stud-row.clickable:hover{ background:var(--panel-2); }
 
   /* ---------- MODAL ---------- */
   .modal-overlay{
