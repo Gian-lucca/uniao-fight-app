@@ -102,9 +102,10 @@ function buildCalendarGeneric(ano, mes, presencasMap, actionPrev, actionNext, di
     const diaSemana = new Date(ano, mes, dia).getDay();
     const presente = !!presencasMap[key];
     const isHoje = key === hojeKey;
-    const isSelecionado = diasClicaveis && state.diaCronogramaSelecionado === diaSemana;
-    const classes = ['cal-day', presente ? 'presente':'', isHoje ? 'today':'', isSelecionado ? 'selecionado':''].filter(Boolean).join(' ');
-    const attrs = diasClicaveis ? `data-action="ver-dia-cronograma" data-id="${diaSemana}"` : '';
+    const academiaFechada = diaSemana === 0 || diaSemana === 6; // domingo e sábado
+    const isSelecionado = diasClicaveis && state.diaCronogramaSelecionado && state.diaCronogramaSelecionado.key === key;
+    const classes = ['cal-day', presente ? 'presente':'', isHoje ? 'today':'', isSelecionado ? 'selecionado':'', academiaFechada ? 'fechado':''].filter(Boolean).join(' ');
+    const attrs = (diasClicaveis && !academiaFechada) ? `data-action="ver-dia-cronograma" data-id="${diaSemana}:${key}"` : '';
     cells += `<div class="${classes}" ${attrs}>${dia}</div>`;
   }
 
@@ -116,7 +117,7 @@ function buildCalendarGeneric(ano, mes, presencasMap, actionPrev, actionNext, di
       <button data-action="${actionNext}">›</button>
     </div>
     <div class="cal-grid">${dows}${cells}</div>
-    ${diasClicaveis ? '<div class="cal-hint">Toque num dia para ver o cronograma daquele dia da semana</div>' : ''}
+    ${diasClicaveis ? '<div class="cal-hint">Toque num dia (seg a sex) para ver o cronograma daquele dia da semana</div>' : ''}
   </div>`;
 }
 
@@ -343,8 +344,16 @@ function adminView(){
       <h2>Painel do Admin</h2>
       <button data-action="logout">Sair</button>
     </div>
-    <button class="btn btn-ghost" data-action="go-comunicados" style="margin-bottom:10px;">📣 Comunicados</button>
-    <button class="btn btn-ghost" data-action="go-cronograma-admin" style="margin-bottom:18px;">🗓️ Cronograma da semana</button>
+    <div class="admin-shortcuts">
+      <button class="shortcut-card" data-action="go-comunicados">
+        <span class="shortcut-icon">📣</span>
+        <span class="shortcut-label">Comunicados</span>
+      </button>
+      <button class="shortcut-card" data-action="go-cronograma-admin">
+        <span class="shortcut-icon">🗓️</span>
+        <span class="shortcut-label">Cronograma</span>
+      </button>
+    </div>
     <div class="section-label">Solicitações pendentes (${pend.length})</div>
     ${pendItems}
 
@@ -476,19 +485,18 @@ function listaCronogramaHtml(trilha, editavel){
   if(!linhas.length) return `<div class="empty-note">Nada cadastrado ainda para essa trilha.</div>`;
 
   return ORDEM_SEMANA.map(dia=>{
-    const doDia = linhas.filter(c=>c.dia_semana===dia).sort((a,b)=>(a.horario||'').localeCompare(b.horario||''));
+    const doDia = linhas.filter(c=>c.dia_semana===dia).sort((a,b)=>a.atividade.localeCompare(b.atividade));
     if(!doDia.length) return '';
     const itens = doDia.map(c=>`
       <div class="cron-item">
-        <div class="cron-horario">${c.horario || ''}</div>
         <div class="cron-info">
           <div class="cron-atividade">${c.atividade}</div>
           ${c.observacao ? `<div class="sm">${c.observacao}</div>` : ''}
         </div>
         ${editavel ? `
           <div class="cron-actions">
-            <button class="link-btn" data-action="editar-cronograma" data-id="${c.id}">Editar</button>
-            <button class="link-btn" data-action="excluir-cronograma" data-id="${c.id}" style="color:#f2b6bf;">Excluir</button>
+            <button class="icon-btn" data-action="editar-cronograma" data-id="${c.id}" title="Editar">✏️</button>
+            <button class="icon-btn icon-btn-danger" data-action="excluir-cronograma" data-id="${c.id}" title="Excluir">🗑️</button>
           </div>` : ''}
       </div>`).join('');
     return `
@@ -537,10 +545,6 @@ function cronogramaFormView(){
       <select id="cron-dia">
         ${DIAS_SEMANA.map((nome,idx)=>`<option value="${idx}" ${c && c.dia_semana===idx ? 'selected':''}>${nome}</option>`).join('')}
       </select>
-    </div>
-    <div class="field">
-      <label>Horário</label>
-      <input id="cron-horario" type="text" placeholder="Ex: 19:00" value="${c ? (c.horario||'') : ''}">
     </div>
     <div class="field">
       <label>Atividade</label>
@@ -611,6 +615,7 @@ function adminPersonView(){
         <h2>${p.nome}</h2>
       </div>
       <div class="profile-card">
+        <button class="profile-edit-btn" data-action="editar-pessoa" title="Editar dados">✏️</button>
         <div class="profile-name">${p.nome}</div>
         <div class="profile-meta">
           ${p.papel === 'aluno' ? 'Aluno' : p.papel === 'professor' ? 'Professor' : 'Administrador'} · Unidade ${p.unidade || '—'}<br>
@@ -618,7 +623,6 @@ function adminPersonView(){
         </div>
         <div class="grad-tags-wrap">${gradBadges}</div>
       </div>
-      <button class="btn btn-ghost" data-action="editar-pessoa" style="margin-bottom:6px;">Editar dados</button>
       ${presencaSection}
     </div>`;
   }
@@ -694,20 +698,19 @@ function adminPersonView(){
 }
 
 function painelDiaCronograma(){
-  if(state.diaCronogramaSelecionado === null) return '';
+  if(!state.diaCronogramaSelecionado) return '';
   const u = state.currentUser;
-  const dia = state.diaCronogramaSelecionado;
+  const dia = state.diaCronogramaSelecionado.dia;
 
   const trilhas = new Set();
   (u.modalidades || []).forEach(m => trilhas.add(m === 'Jiu-Jitsu' ? 'jiu-jitsu' : 'geral'));
 
   const itens = state.cronogramaTodos
     .filter(c => c.dia_semana === dia && trilhas.has(c.trilha))
-    .sort((a,b) => (a.horario||'').localeCompare(b.horario||''));
+    .sort((a,b) => a.atividade.localeCompare(b.atividade));
 
   const corpo = itens.length ? itens.map(c=>`
     <div class="cron-item">
-      <div class="cron-horario">${c.horario || ''}</div>
       <div class="cron-info">
         <div class="cron-atividade">${c.atividade}</div>
         ${c.observacao ? `<div class="sm">${c.observacao}</div>` : ''}
@@ -900,12 +903,8 @@ async function carregarComunicadosNaoLidos(){
   const u = state.currentUser;
   const { data: todos } = await supabaseClient
     .from('comunicados').select('*').eq('ativo', true).order('criado_em', { ascending: true });
-  const { data: lidos } = await supabaseClient
-    .from('comunicados_lidos').select('comunicado_id').eq('usuario_id', u.id);
 
-  const lidosSet = new Set((lidos || []).map(l => l.comunicado_id));
-  const relevantes = (todos || []).filter(c => !c.unidade || c.unidade === u.unidade);
-  state.comunicadosNaoLidos = relevantes.filter(c => !lidosSet.has(c.id));
+  state.comunicadosNaoLidos = (todos || []).filter(c => !c.unidade || c.unidade === u.unidade);
   state.comunicadoAtual = state.comunicadosNaoLidos[0] || null;
 }
 
@@ -1227,8 +1226,13 @@ async function handleAction(action, id){
   }
 
   if(action==='ver-dia-cronograma'){
-    const dia = parseInt(id, 10);
-    state.diaCronogramaSelecionado = state.diaCronogramaSelecionado === dia ? null : dia;
+    const [diaStr, key] = id.split(':');
+    const dia = parseInt(diaStr, 10);
+    if(state.diaCronogramaSelecionado && state.diaCronogramaSelecionado.key === key){
+      state.diaCronogramaSelecionado = null;
+    } else {
+      state.diaCronogramaSelecionado = { dia, key };
+    }
     return render();
   }
 
@@ -1404,7 +1408,8 @@ async function handleAction(action, id){
   if(action==='fechar-comunicado'){
     const c = state.comunicadoAtual;
     if(c){
-      await supabaseClient.from('comunicados_lidos').insert({ comunicado_id: c.id, usuario_id: state.currentUser.id });
+      // Fecha só na tela atual - ele volta a aparecer da próxima vez que o app for aberto.
+      // Só some de vez quando o administrador excluir o comunicado.
       state.comunicadosNaoLidos = state.comunicadosNaoLidos.filter(x=>x.id!==c.id);
       state.comunicadoAtual = state.comunicadosNaoLidos[0] || null;
     }
@@ -1445,7 +1450,6 @@ async function handleAction(action, id){
   if(action==='salvar-cronograma'){
     const trilha = document.getElementById('cron-trilha').value;
     const dia_semana = parseInt(document.getElementById('cron-dia').value, 10);
-    const horario = document.getElementById('cron-horario').value.trim();
     const atividade = document.getElementById('cron-atividade').value.trim();
     const observacao = document.getElementById('cron-obs').value.trim();
 
@@ -1456,11 +1460,11 @@ async function handleAction(action, id){
     let error;
     if(state.cronogramaEditando){
       ({ error } = await supabaseClient.from('cronograma')
-        .update({ trilha, dia_semana, horario, atividade, observacao })
+        .update({ trilha, dia_semana, atividade, observacao })
         .eq('id', state.cronogramaEditando.id));
     } else {
       ({ error } = await supabaseClient.from('cronograma')
-        .insert({ trilha, dia_semana, horario, atividade, observacao }));
+        .insert({ trilha, dia_semana, atividade, observacao }));
     }
 
     state.loading = false;
