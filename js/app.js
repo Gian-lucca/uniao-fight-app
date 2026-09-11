@@ -37,7 +37,13 @@ const state = {
   // --- busca e filtros do painel do admin ---
   adminBusca: '',
   adminFiltroUnidade: '',
-  adminFiltroModalidade: ''
+  adminFiltroModalidade: '',
+
+  // --- comunicados ---
+  comunicados: [],           // lista completa (visão do admin)
+  comunicadoEditando: null,  // objeto do comunicado em edição, ou null = criando novo
+  comunicadosNaoLidos: [],   // fila de comunicados não lidos (aluno/professor)
+  comunicadoAtual: null      // comunicado mostrado no modal agora
 };
 
 /* ---------------- HELPERS ---------------- */
@@ -119,6 +125,8 @@ function renderScreen(){
     case 'pending': return pendingView();
     case 'admin': return adminView();
     case 'admin-pessoa': return adminPersonView();
+    case 'admin-comunicados': return adminComunicadosView();
+    case 'comunicado-form': return comunicadoFormView();
     case 'student': return studentView();
     case 'teacher': return teacherView();
     case 'editar-perfil': return editarPerfilView();
@@ -318,10 +326,11 @@ function adminView(){
       <h2>Painel do Admin</h2>
       <button data-action="logout">Sair</button>
     </div>
+    <button class="btn btn-ghost" data-action="go-comunicados" style="margin-bottom:18px;">📣 Comunicados</button>
     <div class="section-label">Solicitações pendentes (${pend.length})</div>
     ${pendItems}
 
-    <div class="section-label">Equipes</div>
+    <div class="section-label">Equipe aprovada</div>
     <div class="admin-filtros">
       <input id="admin-busca" type="text" placeholder="Buscar por nome..." value="${state.adminBusca}">
       <div class="admin-filtros-row">
@@ -363,6 +372,83 @@ function modalView(){
         <button class="btn-reject" data-action="close-modal">Cancelar</button>
         <button class="btn-approve" data-action="confirm-approve" data-id="${u.id}">Confirmar</button>
       </div>
+    </div>
+  </div>`;
+}
+
+function adminComunicadosView(){
+  const lista = state.comunicados;
+  const itens = lista.length ? lista.map(c=>`
+    <div class="comunicado-card">
+      ${c.imagem_url ? `<img src="${c.imagem_url}" class="comunicado-thumb">` : ''}
+      <div class="comunicado-info">
+        <div class="comunicado-titulo">${c.titulo}</div>
+        <div class="sm">${c.unidade ? 'Unidade ' + c.unidade : 'Todas as unidades'} · ${new Date(c.criado_em).toLocaleDateString('pt-BR')}</div>
+        <div class="comunicado-actions">
+          <button class="link-btn" data-action="editar-comunicado" data-id="${c.id}">Editar</button>
+          <button class="link-btn" data-action="excluir-comunicado" data-id="${c.id}" style="color:#f2b6bf;">Excluir</button>
+        </div>
+      </div>
+    </div>`).join('') : `<div class="empty-note">Nenhum comunicado publicado ainda.</div>`;
+
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="voltar-admin-comunicados">←</button>
+      <h2>Comunicados</h2>
+    </div>
+    <button class="btn btn-primary" data-action="novo-comunicado" style="margin-bottom:20px;">+ Criar comunicado</button>
+    ${itens}
+  </div>`;
+}
+
+function comunicadoFormView(){
+  const c = state.comunicadoEditando;
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="go-comunicados">←</button>
+      <h2>${c ? 'Editar comunicado' : 'Novo comunicado'}</h2>
+    </div>
+    ${state.error ? `<div class="error-msg">${state.error}</div>` : ''}
+    <div class="field">
+      <label>Título</label>
+      <input id="com-titulo" type="text" value="${c ? c.titulo : ''}" placeholder="Ex: Treino cancelado sexta-feira">
+    </div>
+    <div class="field">
+      <label>Comunicado</label>
+      <textarea id="com-corpo" rows="5" placeholder="Escreva o comunicado aqui...">${c ? c.corpo : ''}</textarea>
+    </div>
+    <div class="field">
+      <label>Imagem (opcional)</label>
+      ${c && c.imagem_url ? `<img src="${c.imagem_url}" class="comunicado-preview-atual">` : ''}
+      <input id="com-imagem" type="file" accept="image/*">
+    </div>
+    <div class="field">
+      <label>Enviar para</label>
+      <select id="com-unidade">
+        <option value="" ${!c || !c.unidade ? 'selected':''}>Todas as unidades</option>
+        <option value="Anchieta" ${c && c.unidade==='Anchieta' ? 'selected':''}>Somente Anchieta</option>
+        <option value="Ricardo" ${c && c.unidade==='Ricardo' ? 'selected':''}>Somente Ricardo</option>
+      </select>
+    </div>
+    <button class="btn btn-primary" data-action="salvar-comunicado" ${state.loading ? 'disabled' : ''}>
+      ${state.loading ? 'Publicando...' : (c ? 'Salvar alterações' : 'Publicar comunicado')}
+    </button>
+  </div>`;
+}
+
+// Modal que aparece pro aluno/professor quando existe comunicado não lido
+function comunicadoModalView(){
+  const c = state.comunicadoAtual;
+  if(!c) return '';
+  return `
+  <div class="modal-overlay">
+    <div class="modal-box comunicado-modal">
+      <button class="comunicado-fechar" data-action="fechar-comunicado">×</button>
+      ${c.imagem_url ? `<img src="${c.imagem_url}" class="comunicado-modal-img">` : ''}
+      <h3>${c.titulo}</h3>
+      <p class="comunicado-corpo">${c.corpo}</p>
     </div>
   </div>`;
 }
@@ -530,7 +616,8 @@ function studentView(){
       ${jaRegistrouHoje ? 'Presença já registrada hoje' : 'Registrar presença'}
     </button>
     ${statusHtml}
-  </div>`;
+  </div>
+  ${comunicadoModalView()}`;
 }
 
 function teacherView(){
@@ -555,7 +642,8 @@ function teacherView(){
     <button class="btn btn-ghost" data-action="go-editar-perfil" style="margin-bottom:18px;">Editar perfil</button>
     <div class="section-label">Seus alunos</div>
     ${alunosItems}
-  </div>`;
+  </div>
+  ${comunicadoModalView()}`;
 }
 
 function editarPerfilView(){
@@ -621,6 +709,51 @@ async function carregarAlunosDoProfessor(){
     .overlaps('modalidades', u.modalidades || []);
   state.alunosDoProfessor = data || [];
   render();
+}
+
+async function carregarComunicadosAdmin(){
+  const { data } = await supabaseClient
+    .from('comunicados').select('*').order('criado_em', { ascending: false });
+  state.comunicados = data || [];
+  render();
+}
+
+async function fazerUploadImagem(file){
+  const nomeArquivo = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9.]/g,'_')}`;
+  const { error } = await supabaseClient.storage.from('comunicados').upload(nomeArquivo, file);
+  if(error) throw error;
+  const { data } = supabaseClient.storage.from('comunicados').getPublicUrl(nomeArquivo);
+  return data.publicUrl;
+}
+
+// Busca comunicados relevantes pra unidade do aluno/professor que ainda não foram lidos
+async function carregarComunicadosNaoLidos(){
+  const u = state.currentUser;
+  const { data: todos } = await supabaseClient
+    .from('comunicados').select('*').eq('ativo', true).order('criado_em', { ascending: true });
+  const { data: lidos } = await supabaseClient
+    .from('comunicados_lidos').select('comunicado_id').eq('usuario_id', u.id);
+
+  const lidosSet = new Set((lidos || []).map(l => l.comunicado_id));
+  const relevantes = (todos || []).filter(c => !c.unidade || c.unidade === u.unidade);
+  state.comunicadosNaoLidos = relevantes.filter(c => !lidosSet.has(c.id));
+  state.comunicadoAtual = state.comunicadosNaoLidos[0] || null;
+}
+
+// Fica ouvindo novos comunicados em tempo real (enquanto o app está aberto)
+function assinarNovosComunicados(){
+  const u = state.currentUser;
+  supabaseClient
+    .channel('comunicados-realtime')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comunicados' }, payload => {
+      const c = payload.new;
+      if(c.ativo && (!c.unidade || c.unidade === u.unidade)){
+        state.comunicadosNaoLidos.push(c);
+        if(!state.comunicadoAtual) state.comunicadoAtual = c;
+        render();
+      }
+    })
+    .subscribe();
 }
 
 async function carregarPresencasDoMes(){
@@ -838,8 +971,15 @@ async function handleAction(action, id){
 
     state.currentUser = perfil;
     if(perfil.papel==='administrador'){ await carregarPainelAdmin(); return go('admin'); }
-    if(perfil.papel==='professor'){ await carregarAlunosDoProfessor(); return go('teacher'); }
+    if(perfil.papel==='professor'){
+      await carregarAlunosDoProfessor();
+      await carregarComunicadosNaoLidos();
+      assinarNovosComunicados();
+      return go('teacher');
+    }
     await carregarPresencasDoMes();
+    await carregarComunicadosNaoLidos();
+    assinarNovosComunicados();
     return go('student');
   }
 
@@ -1014,6 +1154,81 @@ async function handleAction(action, id){
 
     return go(state.currentUser.papel === 'professor' ? 'teacher' : 'student');
   }
+
+  if(action==='go-comunicados'){
+    await carregarComunicadosAdmin();
+    return go('admin-comunicados');
+  }
+
+  if(action==='voltar-admin-comunicados'){
+    return go('admin');
+  }
+
+  if(action==='novo-comunicado'){
+    state.comunicadoEditando = null;
+    state.error = '';
+    return go('comunicado-form');
+  }
+
+  if(action==='editar-comunicado'){
+    state.comunicadoEditando = state.comunicados.find(c=>c.id===id) || null;
+    state.error = '';
+    return go('comunicado-form');
+  }
+
+  if(action==='excluir-comunicado'){
+    await supabaseClient.from('comunicados').delete().eq('id', id);
+    return carregarComunicadosAdmin();
+  }
+
+  if(action==='salvar-comunicado'){
+    const titulo = document.getElementById('com-titulo').value.trim();
+    const corpo = document.getElementById('com-corpo').value.trim();
+    const unidade = document.getElementById('com-unidade').value || null;
+    const fileInput = document.getElementById('com-imagem');
+
+    if(!titulo || !corpo){ state.error = 'Preencha o título e o comunicado.'; return render(); }
+
+    state.loading = true; render();
+
+    let imagem_url = state.comunicadoEditando ? state.comunicadoEditando.imagem_url : null;
+    if(fileInput.files[0]){
+      try{
+        imagem_url = await fazerUploadImagem(fileInput.files[0]);
+      } catch(err){
+        state.loading = false;
+        state.error = 'Erro ao enviar a imagem: ' + err.message;
+        return render();
+      }
+    }
+
+    let error;
+    if(state.comunicadoEditando){
+      ({ error } = await supabaseClient.from('comunicados')
+        .update({ titulo, corpo, unidade, imagem_url })
+        .eq('id', state.comunicadoEditando.id));
+    } else {
+      ({ error } = await supabaseClient.from('comunicados')
+        .insert({ titulo, corpo, unidade, imagem_url, criado_por: state.currentUser.id }));
+    }
+
+    state.loading = false;
+    if(error){ state.error = 'Erro ao publicar: ' + error.message; return render(); }
+
+    state.comunicadoEditando = null;
+    await carregarComunicadosAdmin();
+    return go('admin-comunicados');
+  }
+
+  if(action==='fechar-comunicado'){
+    const c = state.comunicadoAtual;
+    if(c){
+      await supabaseClient.from('comunicados_lidos').insert({ comunicado_id: c.id, usuario_id: state.currentUser.id });
+      state.comunicadosNaoLidos = state.comunicadosNaoLidos.filter(x=>x.id!==c.id);
+      state.comunicadoAtual = state.comunicadosNaoLidos[0] || null;
+    }
+    return render();
+  }
 }
 
 /* ---------------- BOOT ---------------- */
@@ -1033,8 +1248,18 @@ async function handleAction(action, id){
 
     state.currentUser = perfil;
     if(perfil.papel==='administrador'){ await carregarPainelAdmin(); state.screen='admin'; }
-    else if(perfil.papel==='professor'){ await carregarAlunosDoProfessor(); state.screen='teacher'; }
-    else { await carregarPresencasDoMes(); state.screen='student'; }
+    else if(perfil.papel==='professor'){
+      await carregarAlunosDoProfessor();
+      await carregarComunicadosNaoLidos();
+      assinarNovosComunicados();
+      state.screen='teacher';
+    }
+    else {
+      await carregarPresencasDoMes();
+      await carregarComunicadosNaoLidos();
+      assinarNovosComunicados();
+      state.screen='student';
+    }
     render();
   } catch(err){
     console.error('Erro ao iniciar o app:', err);
