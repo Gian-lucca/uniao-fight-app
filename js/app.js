@@ -43,7 +43,14 @@ const state = {
   comunicados: [],           // lista completa (visão do admin)
   comunicadoEditando: null,  // objeto do comunicado em edição, ou null = criando novo
   comunicadosNaoLidos: [],   // fila de comunicados não lidos (aluno/professor)
-  comunicadoAtual: null      // comunicado mostrado no modal agora
+  comunicadoAtual: null,     // comunicado mostrado no modal agora
+
+  // --- cronograma semanal ---
+  cronogramaTodos: [],            // todas as linhas (cache local)
+  cronogramaTrilhaAdmin: 'geral', // aba selecionada na tela do admin
+  cronogramaEditando: null,       // linha em edição, ou null = criando nova
+  cronogramaTrilhaView: 'geral',  // aba selecionada na tela de visualização (aluno/professor)
+  diaCronogramaSelecionado: null  // dia da semana (0-6) clicado no calendário do aluno
 };
 
 /* ---------------- HELPERS ---------------- */
@@ -76,7 +83,10 @@ function dataKey(ano, mes, dia){ return `${ano}-${pad2(mes+1)}-${pad2(dia)}`; }
 
 const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
 
-function buildCalendarGeneric(ano, mes, presencasMap, actionPrev, actionNext){
+const DIAS_SEMANA = ['Domingo','Segunda-feira','Terça-feira','Quarta-feira','Quinta-feira','Sexta-feira','Sábado'];
+const ORDEM_SEMANA = [1,2,3,4,5,6,0]; // segunda a domingo, pra exibição
+
+function buildCalendarGeneric(ano, mes, presencasMap, actionPrev, actionNext, diasClicaveis){
   const hoje = new Date();
   const hojeKey = dataKey(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
 
@@ -89,10 +99,13 @@ function buildCalendarGeneric(ano, mes, presencasMap, actionPrev, actionNext){
   for(let i=0;i<primeiroDiaSemana;i++) cells += `<div class="cal-day empty"></div>`;
   for(let dia=1; dia<=totalDias; dia++){
     const key = dataKey(ano, mes, dia);
+    const diaSemana = new Date(ano, mes, dia).getDay();
     const presente = !!presencasMap[key];
     const isHoje = key === hojeKey;
-    const classes = ['cal-day', presente ? 'presente':'', isHoje ? 'today':''].filter(Boolean).join(' ');
-    cells += `<div class="${classes}">${dia}</div>`;
+    const isSelecionado = diasClicaveis && state.diaCronogramaSelecionado === diaSemana;
+    const classes = ['cal-day', presente ? 'presente':'', isHoje ? 'today':'', isSelecionado ? 'selecionado':''].filter(Boolean).join(' ');
+    const attrs = diasClicaveis ? `data-action="ver-dia-cronograma" data-id="${diaSemana}"` : '';
+    cells += `<div class="${classes}" ${attrs}>${dia}</div>`;
   }
 
   return `
@@ -103,11 +116,12 @@ function buildCalendarGeneric(ano, mes, presencasMap, actionPrev, actionNext){
       <button data-action="${actionNext}">›</button>
     </div>
     <div class="cal-grid">${dows}${cells}</div>
+    ${diasClicaveis ? '<div class="cal-hint">Toque num dia para ver o cronograma daquele dia da semana</div>' : ''}
   </div>`;
 }
 
 function buildCalendarHTML(){
-  return buildCalendarGeneric(state.calAno, state.calMes, state.presencas, 'cal-prev', 'cal-next');
+  return buildCalendarGeneric(state.calAno, state.calMes, state.presencas, 'cal-prev', 'cal-next', true);
 }
 
 /* ---------------- RENDER ---------------- */
@@ -127,6 +141,9 @@ function renderScreen(){
     case 'admin-pessoa': return adminPersonView();
     case 'admin-comunicados': return adminComunicadosView();
     case 'comunicado-form': return comunicadoFormView();
+    case 'admin-cronograma': return adminCronogramaView();
+    case 'cronograma-form': return cronogramaFormView();
+    case 'ver-cronograma': return verCronogramaView();
     case 'student': return studentView();
     case 'teacher': return teacherView();
     case 'editar-perfil': return editarPerfilView();
@@ -326,7 +343,8 @@ function adminView(){
       <h2>Painel do Admin</h2>
       <button data-action="logout">Sair</button>
     </div>
-    <button class="btn btn-ghost" data-action="go-comunicados" style="margin-bottom:18px;">📣 Comunicados</button>
+    <button class="btn btn-ghost" data-action="go-comunicados" style="margin-bottom:10px;">📣 Comunicados</button>
+    <button class="btn btn-ghost" data-action="go-cronograma-admin" style="margin-bottom:18px;">🗓️ Cronograma da semana</button>
     <div class="section-label">Solicitações pendentes (${pend.length})</div>
     ${pendItems}
 
@@ -453,6 +471,117 @@ function comunicadoModalView(){
   </div>`;
 }
 
+function listaCronogramaHtml(trilha, editavel){
+  const linhas = state.cronogramaTodos.filter(c=>c.trilha===trilha);
+  if(!linhas.length) return `<div class="empty-note">Nada cadastrado ainda para essa trilha.</div>`;
+
+  return ORDEM_SEMANA.map(dia=>{
+    const doDia = linhas.filter(c=>c.dia_semana===dia).sort((a,b)=>(a.horario||'').localeCompare(b.horario||''));
+    if(!doDia.length) return '';
+    const itens = doDia.map(c=>`
+      <div class="cron-item">
+        <div class="cron-horario">${c.horario || ''}</div>
+        <div class="cron-info">
+          <div class="cron-atividade">${c.atividade}</div>
+          ${c.observacao ? `<div class="sm">${c.observacao}</div>` : ''}
+        </div>
+        ${editavel ? `
+          <div class="cron-actions">
+            <button class="link-btn" data-action="editar-cronograma" data-id="${c.id}">Editar</button>
+            <button class="link-btn" data-action="excluir-cronograma" data-id="${c.id}" style="color:#f2b6bf;">Excluir</button>
+          </div>` : ''}
+      </div>`).join('');
+    return `
+      <div class="cron-dia-group">
+        <div class="cron-dia-label">${DIAS_SEMANA[dia]}</div>
+        ${itens}
+      </div>`;
+  }).join('');
+}
+
+function adminCronogramaView(){
+  const trilha = state.cronogramaTrilhaAdmin;
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="voltar-admin-cronograma">←</button>
+      <h2>Cronograma</h2>
+    </div>
+    <div class="trilha-tabs">
+      <button class="trilha-tab ${trilha==='geral'?'ativa':''}" data-action="tab-cronograma-admin" data-id="geral">Geral</button>
+      <button class="trilha-tab ${trilha==='jiu-jitsu'?'ativa':''}" data-action="tab-cronograma-admin" data-id="jiu-jitsu">Jiu-Jitsu</button>
+    </div>
+    <button class="btn btn-primary" data-action="novo-cronograma" style="margin:16px 0 20px;">+ Adicionar atividade</button>
+    ${listaCronogramaHtml(trilha, true)}
+  </div>`;
+}
+
+function cronogramaFormView(){
+  const c = state.cronogramaEditando;
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="go-cronograma-admin">←</button>
+      <h2>${c ? 'Editar atividade' : 'Nova atividade'}</h2>
+    </div>
+    ${state.error ? `<div class="error-msg">${state.error}</div>` : ''}
+    <div class="field">
+      <label>Trilha</label>
+      <select id="cron-trilha">
+        <option value="geral" ${(!c && state.cronogramaTrilhaAdmin==='geral') || (c && c.trilha==='geral') ? 'selected':''}>Geral (Boxe, Muay Thai, Kickboxing)</option>
+        <option value="jiu-jitsu" ${(!c && state.cronogramaTrilhaAdmin==='jiu-jitsu') || (c && c.trilha==='jiu-jitsu') ? 'selected':''}>Jiu-Jitsu</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Dia da semana</label>
+      <select id="cron-dia">
+        ${DIAS_SEMANA.map((nome,idx)=>`<option value="${idx}" ${c && c.dia_semana===idx ? 'selected':''}>${nome}</option>`).join('')}
+      </select>
+    </div>
+    <div class="field">
+      <label>Horário</label>
+      <input id="cron-horario" type="text" placeholder="Ex: 19:00" value="${c ? (c.horario||'') : ''}">
+    </div>
+    <div class="field">
+      <label>Atividade</label>
+      <input id="cron-atividade" type="text" placeholder="Ex: Treino técnico" value="${c ? c.atividade : ''}">
+    </div>
+    <div class="field">
+      <label>Observação (opcional)</label>
+      <textarea id="cron-obs" rows="3" placeholder="Detalhes extras...">${c ? (c.observacao||'') : ''}</textarea>
+    </div>
+    <button class="btn btn-primary" data-action="salvar-cronograma" ${state.loading ? 'disabled' : ''}>
+      ${state.loading ? 'Salvando...' : 'Salvar'}
+    </button>
+  </div>`;
+}
+
+function verCronogramaView(){
+  const u = state.currentUser;
+  const trilhas = new Set();
+  (u.modalidades||[]).forEach(m=> trilhas.add(m === 'Jiu-Jitsu' ? 'jiu-jitsu' : 'geral'));
+  const trilhasDisponiveis = Array.from(trilhas);
+  const trilha = trilhasDisponiveis.includes(state.cronogramaTrilhaView) ? state.cronogramaTrilhaView : trilhasDisponiveis[0];
+
+  const tabsHtml = trilhasDisponiveis.length > 1 ? `
+    <div class="trilha-tabs">
+      <button class="trilha-tab ${trilha==='geral'?'ativa':''}" data-action="tab-cronograma-view" data-id="geral">Geral</button>
+      <button class="trilha-tab ${trilha==='jiu-jitsu'?'ativa':''}" data-action="tab-cronograma-view" data-id="jiu-jitsu">Jiu-Jitsu</button>
+    </div>` : '';
+
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="voltar-ver-cronograma">←</button>
+      <h2>Cronograma</h2>
+    </div>
+    ${tabsHtml}
+    <div style="margin-top:16px;">
+      ${listaCronogramaHtml(trilha, false)}
+    </div>
+  </div>`;
+}
+
 function adminPersonView(){
   const p = state.pessoaSelecionada;
   if(!p) return `<div class="screen"><div class="empty-note">Pessoa não encontrada.</div></div>`;
@@ -564,6 +693,38 @@ function adminPersonView(){
   </div>`;
 }
 
+function painelDiaCronograma(){
+  if(state.diaCronogramaSelecionado === null) return '';
+  const u = state.currentUser;
+  const dia = state.diaCronogramaSelecionado;
+
+  const trilhas = new Set();
+  (u.modalidades || []).forEach(m => trilhas.add(m === 'Jiu-Jitsu' ? 'jiu-jitsu' : 'geral'));
+
+  const itens = state.cronogramaTodos
+    .filter(c => c.dia_semana === dia && trilhas.has(c.trilha))
+    .sort((a,b) => (a.horario||'').localeCompare(b.horario||''));
+
+  const corpo = itens.length ? itens.map(c=>`
+    <div class="cron-item">
+      <div class="cron-horario">${c.horario || ''}</div>
+      <div class="cron-info">
+        <div class="cron-atividade">${c.atividade}</div>
+        ${c.observacao ? `<div class="sm">${c.observacao}</div>` : ''}
+        ${trilhas.size > 1 ? `<div class="sm" style="color:var(--yellow);">${c.trilha === 'jiu-jitsu' ? 'Jiu-Jitsu' : 'Geral'}</div>` : ''}
+      </div>
+    </div>`).join('') : `<div class="empty-note">Nada programado para esse dia.</div>`;
+
+  return `
+  <div class="cron-dia-painel">
+    <div class="cal-head">
+      <h3>${DIAS_SEMANA[dia]}</h3>
+      <button data-action="fechar-dia-cronograma">×</button>
+    </div>
+    ${corpo}
+  </div>`;
+}
+
 function studentView(){
   const u = state.currentUser;
   const modalidades = u.modalidades || [];
@@ -600,6 +761,7 @@ function studentView(){
       <button data-action="logout">Sair</button>
     </div>
     <div class="profile-card">
+      <button class="profile-edit-btn" data-action="go-editar-perfil" title="Editar perfil">✏️</button>
       <div class="profile-name">${u.nome}</div>
       <div class="profile-meta">
         Aluno · Unidade ${u.unidade}<br>
@@ -607,9 +769,9 @@ function studentView(){
       </div>
       <div class="grad-tags-wrap">${gradBadges}</div>
     </div>
-    <button class="btn btn-ghost" data-action="go-editar-perfil" style="margin-bottom:18px;">Editar perfil</button>
 
     ${buildCalendarHTML()}
+    ${painelDiaCronograma()}
 
     ${seletorModalidade}
     <button class="btn-presenca" data-action="registrar-presenca" ${jaRegistrouHoje || state.presencaStatus==='buscando' ? 'disabled' : ''}>
@@ -636,10 +798,11 @@ function teacherView(){
       <button data-action="logout">Sair</button>
     </div>
     <div class="profile-card">
+      <button class="profile-edit-btn" data-action="go-editar-perfil" title="Editar perfil">✏️</button>
       <div class="profile-name">${u.nome}</div>
       <div class="profile-meta">Professor · ${(u.modalidades||[]).join(', ')} · Unidade ${u.unidade}</div>
     </div>
-    <button class="btn btn-ghost" data-action="go-editar-perfil" style="margin-bottom:18px;">Editar perfil</button>
+    <button class="btn btn-ghost" data-action="go-ver-cronograma" style="margin-bottom:18px;">🗓️ Cronograma da semana</button>
     <div class="section-label">Seus alunos</div>
     ${alunosItems}
   </div>
@@ -708,6 +871,12 @@ async function carregarAlunosDoProfessor(){
     .eq('unidade', u.unidade)
     .overlaps('modalidades', u.modalidades || []);
   state.alunosDoProfessor = data || [];
+  render();
+}
+
+async function carregarCronograma(){
+  const { data } = await supabaseClient.from('cronograma').select('*');
+  state.cronogramaTodos = data || [];
   render();
 }
 
@@ -979,6 +1148,7 @@ async function handleAction(action, id){
     }
     await carregarPresencasDoMes();
     await carregarComunicadosNaoLidos();
+    await carregarCronograma();
     assinarNovosComunicados();
     return go('student');
   }
@@ -1054,6 +1224,17 @@ async function handleAction(action, id){
 
   if(action==='registrar-presenca'){
     return registrarPresenca();
+  }
+
+  if(action==='ver-dia-cronograma'){
+    const dia = parseInt(id, 10);
+    state.diaCronogramaSelecionado = state.diaCronogramaSelecionado === dia ? null : dia;
+    return render();
+  }
+
+  if(action==='fechar-dia-cronograma'){
+    state.diaCronogramaSelecionado = null;
+    return render();
   }
 
   if(action==='abrir-pessoa'){
@@ -1229,6 +1410,81 @@ async function handleAction(action, id){
     }
     return render();
   }
+
+  if(action==='go-cronograma-admin'){
+    await carregarCronograma();
+    return go('admin-cronograma');
+  }
+
+  if(action==='voltar-admin-cronograma'){
+    return go('admin');
+  }
+
+  if(action==='tab-cronograma-admin'){
+    state.cronogramaTrilhaAdmin = id;
+    return render();
+  }
+
+  if(action==='novo-cronograma'){
+    state.cronogramaEditando = null;
+    state.error = '';
+    return go('cronograma-form');
+  }
+
+  if(action==='editar-cronograma'){
+    state.cronogramaEditando = state.cronogramaTodos.find(c=>c.id===id) || null;
+    state.error = '';
+    return go('cronograma-form');
+  }
+
+  if(action==='excluir-cronograma'){
+    await supabaseClient.from('cronograma').delete().eq('id', id);
+    return carregarCronograma();
+  }
+
+  if(action==='salvar-cronograma'){
+    const trilha = document.getElementById('cron-trilha').value;
+    const dia_semana = parseInt(document.getElementById('cron-dia').value, 10);
+    const horario = document.getElementById('cron-horario').value.trim();
+    const atividade = document.getElementById('cron-atividade').value.trim();
+    const observacao = document.getElementById('cron-obs').value.trim();
+
+    if(!atividade){ state.error = 'Preencha ao menos a atividade.'; return render(); }
+
+    state.loading = true; render();
+
+    let error;
+    if(state.cronogramaEditando){
+      ({ error } = await supabaseClient.from('cronograma')
+        .update({ trilha, dia_semana, horario, atividade, observacao })
+        .eq('id', state.cronogramaEditando.id));
+    } else {
+      ({ error } = await supabaseClient.from('cronograma')
+        .insert({ trilha, dia_semana, horario, atividade, observacao }));
+    }
+
+    state.loading = false;
+    if(error){ state.error = 'Erro ao salvar: ' + error.message; return render(); }
+
+    state.cronogramaTrilhaAdmin = trilha;
+    state.cronogramaEditando = null;
+    await carregarCronograma();
+    return go('admin-cronograma');
+  }
+
+  if(action==='go-ver-cronograma'){
+    await carregarCronograma();
+    return go('ver-cronograma');
+  }
+
+  if(action==='voltar-ver-cronograma'){
+    return go(state.currentUser.papel === 'professor' ? 'teacher' : 'student');
+  }
+
+  if(action==='tab-cronograma-view'){
+    state.cronogramaTrilhaView = id;
+    return render();
+  }
 }
 
 /* ---------------- BOOT ---------------- */
@@ -1257,6 +1513,7 @@ async function handleAction(action, id){
     else {
       await carregarPresencasDoMes();
       await carregarComunicadosNaoLidos();
+      await carregarCronograma();
       assinarNovosComunicados();
       state.screen='student';
     }
