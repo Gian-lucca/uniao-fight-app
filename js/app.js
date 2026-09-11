@@ -6,31 +6,40 @@ const GRADUACOES = {
   'Jiu-Jitsu': ['Faixa Branca','Faixa Azul','Faixa Roxa','Faixa Marrom','Faixa Preta']
 };
 
-let nextId = 2;
 const state = {
   screen: 'home',
   currentUser: null,
   error: '',
+  loading: false,
   modalUserId: null,
-  users: [
-    { id:1, nome:'Admin', senha:'admin123', papel:'administrador', status:'aprovado', unidade:null, modalidade:null, graduacao:null }
-  ]
+  pendentes: [],
+  aprovados: [],
+  alunosDoProfessor: [],
+  modalPessoa: null
 };
 
 /* ---------------- HELPERS ---------------- */
+
+// Converte o "nome" digitado em um e-mail interno, só para o Supabase Auth
+// (o usuário nunca vê nem digita e-mail, só nome + senha, como no app original)
+function nomeParaEmail(nome){
+  const slug = nome.trim().toLowerCase()
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '.')
+    .replace(/^\.+|\.+$/g, '');
+  return `${slug}@uniaofight.app`;
+}
+
 function pwChecklist(pw){
-  const rules = [
+  return [
     { ok: pw.length>=8, label:'Mínimo de 8 caracteres' },
     { ok: /[A-Z]/.test(pw), label:'Uma letra maiúscula' },
     { ok: /[a-z]/.test(pw), label:'Uma letra minúscula' },
     { ok: /[0-9]/.test(pw), label:'Um número' },
     { ok: /[^A-Za-z0-9]/.test(pw), label:'Um caractere especial' },
   ];
-  return rules;
 }
 function pwIsStrong(pw){ return pwChecklist(pw).every(r=>r.ok); }
-
-function pendingUsers(){ return state.users.filter(u=>u.status==='pendente'); }
 
 function go(screen){ state.screen = screen; state.error=''; render(); }
 
@@ -84,12 +93,11 @@ function loginView(){
       <label>Senha</label>
       <input id="in-senha" type="password" placeholder="••••••••">
     </div>
-    <button class="btn btn-primary" data-action="do-login" style="margin-top:6px;">Entrar</button>
+    <button class="btn btn-primary" data-action="do-login" ${state.loading ? 'disabled' : ''}>
+      ${state.loading ? 'Entrando...' : 'Entrar'}
+    </button>
     <div style="text-align:center; margin-top:16px;">
       <button class="link-btn" data-action="go-signup">Primeiro acesso? Cadastre-se</button>
-    </div>
-    <div style="margin-top:auto; padding-top:24px; font-size:11px; color:var(--muted);">
-      Teste como administrador: nome <b>Admin</b>, senha <b>admin123</b>.
     </div>
   </div>`;
 }
@@ -144,7 +152,9 @@ function signupView(){
         <option value="professor">Professor</option>
       </select>
     </div>
-    <button class="btn btn-primary" data-action="do-signup" style="margin-top:6px;">Concluir cadastro</button>
+    <button class="btn btn-primary" data-action="do-signup" ${state.loading ? 'disabled' : ''}>
+      ${state.loading ? 'Enviando...' : 'Concluir cadastro'}
+    </button>
   </div>`;
 }
 
@@ -163,8 +173,8 @@ function pendingView(){
 }
 
 function adminView(){
-  const pend = pendingUsers();
-  const approved = state.users.filter(u=>u.status==='aprovado' && u.papel!=='administrador');
+  const pend = state.pendentes;
+  const approved = state.aprovados;
 
   const pendItems = pend.length ? pend.map(u=>`
     <div class="req-item">
@@ -197,9 +207,8 @@ function adminView(){
 }
 
 function modalView(){
-  if(!state.modalUserId) return '';
-  const u = state.users.find(x=>x.id===state.modalUserId);
-  if(!u) return '';
+  if(!state.modalUserId || !state.modalPessoa) return '';
+  const u = state.modalPessoa;
   const opts = (GRADUACOES[u.modalidade] || []).map(g=>`<option value="${g}">${g}</option>`).join('');
   return `
   <div class="modal-overlay">
@@ -240,7 +249,7 @@ function studentView(){
 
 function teacherView(){
   const u = state.currentUser;
-  const alunos = state.users.filter(a=>a.papel==='aluno' && a.status==='aprovado' && a.unidade===u.unidade && a.modalidade===u.modalidade);
+  const alunos = state.alunosDoProfessor;
   const alunosItems = alunos.length ? alunos.map(a=>`
     <div class="stud-row">
       <div>${a.nome}</div>
@@ -262,6 +271,29 @@ function teacherView(){
   </div>`;
 }
 
+/* ---------------- SUPABASE: consultas ---------------- */
+
+async function carregarPainelAdmin(){
+  const { data: pend } = await supabaseClient
+    .from('profiles').select('*').eq('status', 'pendente');
+  const { data: aprov } = await supabaseClient
+    .from('profiles').select('*').eq('status', 'aprovado').neq('papel', 'administrador');
+
+  state.pendentes = pend || [];
+  state.aprovados = aprov || [];
+  render();
+}
+
+async function carregarAlunosDoProfessor(){
+  const u = state.currentUser;
+  const { data } = await supabaseClient
+    .from('profiles').select('*')
+    .eq('papel', 'aluno').eq('status', 'aprovado')
+    .eq('unidade', u.unidade).eq('modalidade', u.modalidade);
+  state.alunosDoProfessor = data || [];
+  render();
+}
+
 /* ---------------- ACTIONS ---------------- */
 function attachHandlers(){
   const app = document.getElementById('app');
@@ -269,12 +301,11 @@ function attachHandlers(){
   app.querySelectorAll('[data-action]').forEach(el=>{
     el.addEventListener('click', (e)=>{
       const action = el.dataset.action;
-      const id = el.dataset.id ? Number(el.dataset.id) : null;
+      const id = el.dataset.id || null;
       handleAction(action, id);
     });
   });
 
-  // live password strength + match, only inside signup
   const pw = document.getElementById('s-senha');
   const pw2 = document.getElementById('s-senha2');
   if(pw){
@@ -295,21 +326,45 @@ function attachHandlers(){
   }
 }
 
-function handleAction(action, id){
+async function handleAction(action, id){
   if(action==='go-home') return go('home');
   if(action==='go-login') return go('login');
   if(action==='go-signup') return go('signup');
-  if(action==='logout'){ state.currentUser=null; return go('home'); }
+
+  if(action==='logout'){
+    await supabaseClient.auth.signOut();
+    state.currentUser = null;
+    return go('home');
+  }
 
   if(action==='do-login'){
     const nome = document.getElementById('in-nome').value.trim();
     const senha = document.getElementById('in-senha').value;
-    const user = state.users.find(u=>u.nome.toLowerCase()===nome.toLowerCase() && u.senha===senha);
-    if(!user){ state.error='Nome ou senha incorretos.'; return render(); }
-    if(user.status==='pendente'){ state.error='Seu cadastro ainda está em análise pelo administrador.'; return render(); }
-    state.currentUser = user;
-    if(user.papel==='administrador') return go('admin');
-    if(user.papel==='professor') return go('teacher');
+    if(!nome || !senha){ state.error='Preencha nome e senha.'; return render(); }
+
+    state.loading = true; render();
+    const email = nomeParaEmail(nome);
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: senha });
+    state.loading = false;
+
+    if(error){ state.error='Nome ou senha incorretos.'; return render(); }
+
+    const { data: perfil, error: perfilError } = await supabaseClient
+      .from('profiles').select('*').eq('id', data.user.id).single();
+
+    if(perfilError || !perfil){ state.error='Não foi possível carregar seu perfil.'; return render(); }
+
+    if(perfil.status !== 'aprovado'){
+      await supabaseClient.auth.signOut();
+      state.error = perfil.status === 'pendente'
+        ? 'Seu cadastro ainda está em análise pelo administrador.'
+        : 'Seu cadastro não foi aprovado. Fale com a equipe.';
+      return render();
+    }
+
+    state.currentUser = perfil;
+    if(perfil.papel==='administrador'){ await carregarPainelAdmin(); return go('admin'); }
+    if(perfil.papel==='professor'){ await carregarAlunosDoProfessor(); return go('teacher'); }
     return go('student');
   }
 
@@ -325,31 +380,63 @@ function handleAction(action, id){
     if(!nome || !nasc || !unidade || !modalidade || !papel){ state.error='Preencha todos os campos.'; return render(); }
     if(!pwIsStrong(senha)){ state.error='A senha ainda não atende aos requisitos de senha forte.'; return render(); }
     if(senha !== senha2){ state.error='As senhas não coincidem.'; return render(); }
-    if(state.users.some(u=>u.nome.toLowerCase()===nome.toLowerCase())){ state.error='Já existe um cadastro com esse nome.'; return render(); }
 
-    state.users.push({
-      id: nextId++, nome, dataNascimento: nasc, senha, unidade, modalidade, papel,
-      status:'pendente', graduacao:null
+    state.loading = true; render();
+    const email = nomeParaEmail(nome);
+    const { data, error } = await supabaseClient.auth.signUp({ email, password: senha });
+    state.loading = false;
+
+    if(error){
+      state.error = error.message.includes('already registered')
+        ? 'Já existe um cadastro com esse nome.'
+        : 'Não foi possível concluir o cadastro. ' + error.message;
+      return render();
+    }
+
+    const { error: perfilError } = await supabaseClient.from('profiles').insert({
+      id: data.user.id,
+      nome, data_nascimento: nasc, unidade, modalidade, papel,
+      status: 'pendente'
     });
+
+    if(perfilError){ state.error='Erro ao salvar seu perfil: ' + perfilError.message; return render(); }
     return go('pending');
   }
 
-  if(action==='open-approve'){ state.modalUserId=id; return render(); }
-  if(action==='close-modal'){ state.modalUserId=null; return render(); }
+  if(action==='open-approve'){
+    state.modalUserId = id;
+    state.modalPessoa = state.pendentes.find(u=>u.id===id) || null;
+    return render();
+  }
+  if(action==='close-modal'){ state.modalUserId=null; state.modalPessoa=null; return render(); }
 
   if(action==='confirm-approve'){
-    const u = state.users.find(x=>x.id===id);
     const grad = document.getElementById('grad-select').value;
-    u.status='aprovado';
-    u.graduacao=grad;
-    state.modalUserId=null;
-    return render();
+    await supabaseClient.from('profiles').update({ status:'aprovado', graduacao: grad }).eq('id', id);
+    state.modalUserId = null; state.modalPessoa = null;
+    return carregarPainelAdmin();
   }
 
   if(action==='reject'){
-    state.users = state.users.filter(u=>u.id!==id);
-    return render();
+    await supabaseClient.from('profiles').update({ status:'recusado' }).eq('id', id);
+    return carregarPainelAdmin();
   }
 }
 
-render();
+/* ---------------- BOOT ---------------- */
+// Se já existir uma sessão salva no navegador, tenta reconectar direto no painel certo
+(async function boot(){
+  const { data: { session } } = await supabaseClient.auth.getSession();
+  if(!session){ render(); return; }
+
+  const { data: perfil } = await supabaseClient
+    .from('profiles').select('*').eq('id', session.user.id).single();
+
+  if(!perfil || perfil.status !== 'aprovado'){ render(); return; }
+
+  state.currentUser = perfil;
+  if(perfil.papel==='administrador'){ await carregarPainelAdmin(); state.screen='admin'; }
+  else if(perfil.papel==='professor'){ await carregarAlunosDoProfessor(); state.screen='teacher'; }
+  else { state.screen='student'; }
+  render();
+})();
