@@ -29,6 +29,8 @@ const state = {
   pessoaCalMes: new Date().getMonth(),
   pessoaEditModalidades: [],
   pessoaEditGraduacoes: {},
+  pessoaEditPapel: '',
+  pessoaEditRegime: 'mensalidade',
   pessoaModoEdicao: false,
 
   // --- tela "editar meu perfil" ---
@@ -290,6 +292,14 @@ function planoNome(planoId){
   return p ? `${p.nome} · ${formatarPreco(p.preco)}/mês` : 'Ainda não definido pelo administrador';
 }
 
+function badgePagamentoHtml(u){
+  if(u.status_pagamento === 'gratuidade'){
+    return `<div class="pay-badge pay-badge-gratuidade">Gratuidade</div>`;
+  }
+  const pago = u.status_pagamento === 'pago';
+  return `<div class="pay-badge ${pago ? 'pay-badge-pago' : 'pay-badge-pendente'}">${pago ? 'Pago' : 'Pendente'}</div>`;
+}
+
 function pagamentoView(){
   const planosHtml = state.planos.map(p=>`
     <button class="plano-card ${state.planoEscolhido===p.id ? 'selecionado':''}" data-action="escolher-plano" data-id="${p.id}">
@@ -399,28 +409,33 @@ function adminFinanceiroView(){
 
 function alunosFinanceiroFiltrados(){
   return state.aprovados.filter(u=>{
-    if(u.papel !== 'aluno') return false;
+    if(u.papel === 'administrador') return false;
     if(state.finFiltroUnidade && u.unidade !== state.finFiltroUnidade) return false;
-    if(state.finFiltroStatus === 'pago' && u.status_pagamento !== 'pago') return false;
-    if(state.finFiltroStatus === 'pendente' && u.status_pagamento === 'pago') return false;
+    const status = u.status_pagamento;
+    if(state.finFiltroStatus === 'pago' && status !== 'pago') return false;
+    if(state.finFiltroStatus === 'pendente' && (status === 'pago' || status === 'gratuidade')) return false;
+    if(state.finFiltroStatus === 'gratuidade' && status !== 'gratuidade') return false;
     return true;
   });
 }
 
 function adminMensalidadesView(){
-  const alunos = alunosFinanceiroFiltrados();
+  const pessoas = alunosFinanceiroFiltrados();
   const UNIDADES = state.finFiltroUnidade ? [state.finFiltroUnidade] : ['Anchieta','Ricardo'];
 
   const gruposHtml = UNIDADES.map(unidade=>{
-    const doGrupo = alunos.filter(u=>u.unidade===unidade);
+    const doGrupo = pessoas.filter(u=>u.unidade===unidade);
     if(!doGrupo.length) return '';
-    const linhas = doGrupo.map(u=>`
+    const linhas = doGrupo.map(u=>{
+      const tagClasse = u.status_pagamento==='pago' ? 'pay-pago' : u.status_pagamento==='gratuidade' ? 'pay-gratuidade' : 'pay-pendente-tag';
+      const tagTexto = u.status_pagamento==='pago' ? 'Pago' : u.status_pagamento==='gratuidade' ? 'Gratuidade' : 'Pendente';
+      const subInfo = u.status_pagamento==='gratuidade' ? 'Isento' : planoNome(u.plano_id);
+      return `
       <div class="stud-row clickable" data-action="abrir-pessoa" data-id="${u.id}">
-        <div>${u.nome}<div class="sm">${planoNome(u.plano_id)}</div></div>
-        <div class="pay-tag ${u.status_pagamento==='pago' ? 'pay-pago' : 'pay-pendente-tag'}" style="margin-bottom:0;">
-          ${u.status_pagamento==='pago' ? 'Pago' : 'Pendente'}
-        </div>
-      </div>`).join('');
+        <div>${u.nome}<div class="sm">${u.papel==='aluno'?'Aluno':'Professor'} · ${subInfo}</div></div>
+        <div class="pay-tag ${tagClasse}" style="margin-bottom:0;">${tagTexto}</div>
+      </div>`;
+    }).join('');
     return `
       <div class="unidade-group">
         <div class="unidade-label">Unidade ${unidade}</div>
@@ -445,10 +460,11 @@ function adminMensalidadesView(){
           <option value="">Todos os status</option>
           <option value="pago" ${state.finFiltroStatus==='pago'?'selected':''}>Pago</option>
           <option value="pendente" ${state.finFiltroStatus==='pendente'?'selected':''}>Pendente</option>
+          <option value="gratuidade" ${state.finFiltroStatus==='gratuidade'?'selected':''}>Gratuidade</option>
         </select>
       </div>
     </div>
-    ${gruposHtml.trim() ? gruposHtml : `<div class="empty-note">Nenhum aluno encontrado com esse filtro.</div>`}
+    ${gruposHtml.trim() ? gruposHtml : `<div class="empty-note">Ninguém encontrado com esse filtro.</div>`}
   </div>`;
 }
 
@@ -882,12 +898,12 @@ function adminPersonView(){
       <div class="grad-tag">${m.toUpperCase()}: ${(p.graduacoes && p.graduacoes[m]) || 'a definir'}</div>
     `).join('');
 
-    const financeiroSection = p.papel === 'aluno' ? `
+    const financeiroSection = p.papel !== 'administrador' ? `
       <div class="section-label" style="margin-top:20px;">Financeiro</div>
       <div class="stud-row">
-        <div>Plano<div class="sm">${planoNome(p.plano_id)}</div></div>
-        <div class="pay-tag ${p.status_pagamento==='pago' ? 'pay-pago' : p.status_pagamento==='liberacao_mestre' ? 'pay-mestre' : ''}" style="margin-bottom:0;">
-          ${p.status_pagamento==='pago' ? '💰 Pago' : p.status_pagamento==='liberacao_mestre' ? '🥋 Liberação do Mestre' : 'Pendente'}
+        <div>${p.status_pagamento === 'gratuidade' ? 'Regime' : 'Plano'}<div class="sm">${p.status_pagamento === 'gratuidade' ? 'Isento (gratuidade)' : planoNome(p.plano_id)}</div></div>
+        <div class="pay-tag ${p.status_pagamento==='pago' ? 'pay-pago' : p.status_pagamento==='liberacao_mestre' ? 'pay-mestre' : p.status_pagamento==='gratuidade' ? 'pay-gratuidade' : 'pay-pendente-tag'}" style="margin-bottom:0;">
+          ${p.status_pagamento==='pago' ? '💰 Pago' : p.status_pagamento==='liberacao_mestre' ? '🥋 Liberação do Mestre' : p.status_pagamento==='gratuidade' ? 'Gratuidade' : 'Pendente'}
         </div>
       </div>` : '';
 
@@ -958,14 +974,33 @@ function adminPersonView(){
       <div class="check-list">${modalidadeChecks}</div>
     </div>
     ${graduacaoSelects}
-    ${p.papel === 'aluno' ? `
-    <div class="field">
-      <label>Plano</label>
-      <select id="pessoa-plano">
-        <option value="">Nenhum definido</option>
-        ${state.planos.map(pl=>`<option value="${pl.id}" ${p.plano_id===pl.id?'selected':''}>${pl.nome} · ${formatarPreco(pl.preco)}</option>`).join('')}
-      </select>
-    </div>` : ''}
+    ${(() => {
+      const papelAtual = state.pessoaEditPapel || p.papel;
+      const planoSelectHtml = `
+        <div class="field">
+          <label>Plano</label>
+          <select id="pessoa-plano">
+            <option value="">Nenhum definido</option>
+            ${state.planos.map(pl=>`<option value="${pl.id}" ${p.plano_id===pl.id?'selected':''}>${pl.nome} · ${formatarPreco(pl.preco)}</option>`).join('')}
+          </select>
+        </div>`;
+
+      if(papelAtual === 'aluno') return planoSelectHtml;
+
+      if(papelAtual === 'professor'){
+        return `
+          <div class="field">
+            <label>Regime</label>
+            <select id="pessoa-regime">
+              <option value="gratuidade" ${state.pessoaEditRegime==='gratuidade'?'selected':''}>Gratuidade (isento)</option>
+              <option value="mensalidade" ${state.pessoaEditRegime==='mensalidade'?'selected':''}>Mensalidade (paga como aluno)</option>
+            </select>
+          </div>
+          ${state.pessoaEditRegime === 'mensalidade' ? planoSelectHtml : ''}`;
+      }
+
+      return '';
+    })()}
     <div class="field">
       <label>Papel</label>
       <select id="pessoa-papel">
@@ -1049,8 +1084,7 @@ function studentView(){
       </select>
     </div>` : '';
 
-  const pago = u.status_pagamento === 'pago';
-  const badgePagamento = `<div class="pay-badge ${pago ? 'pay-badge-pago' : 'pay-badge-pendente'}">${pago ? 'Pago' : 'Pendente'}</div>`;
+  const badgePagamento = badgePagamentoHtml(u);
 
   return `
   <div class="screen">
@@ -1104,6 +1138,7 @@ function teacherView(){
       <button data-action="logout">Sair</button>
     </div>
     <div class="profile-card">
+      ${badgePagamentoHtml(u)}
       <button class="profile-edit-btn" data-action="go-editar-perfil" title="Editar perfil">✏️</button>
       <div class="profile-name">${u.nome}</div>
       <div class="profile-meta">Professor · ${(u.modalidades||[]).join(', ')} · Unidade ${u.unidade}</div>
@@ -1117,6 +1152,11 @@ function teacherView(){
         <span class="shortcut-icon">🥋</span>
         <span class="shortcut-label">Registrar treino</span>
       </button>
+      ${u.status_pagamento !== 'gratuidade' ? `
+      <button class="shortcut-card" data-action="go-pagar-mensalidade">
+        <span class="shortcut-icon">💳</span>
+        <span class="shortcut-label">Mensalidade</span>
+      </button>` : ''}
     </div>
     <div class="section-label">Seus alunos</div>
     ${alunosItems}
@@ -1187,6 +1227,7 @@ function professorTreinoView(){
       <button data-action="logout">Sair</button>
     </div>
     <div class="profile-card">
+      ${badgePagamentoHtml(u)}
       <button class="profile-edit-btn" data-action="go-editar-perfil" title="Editar perfil">✏️</button>
       <div class="profile-name">${u.nome}</div>
       <div class="profile-meta">
@@ -1201,6 +1242,11 @@ function professorTreinoView(){
         <span class="shortcut-icon">📋</span>
         <span class="shortcut-label">Voltar pro modo professor</span>
       </button>
+      ${u.status_pagamento !== 'gratuidade' ? `
+      <button class="shortcut-card" data-action="go-pagar-mensalidade">
+        <span class="shortcut-icon">💳</span>
+        <span class="shortcut-label">Mensalidade</span>
+      </button>` : ''}
     </div>
 
     ${buildCalendarHTML()}
@@ -1525,6 +1571,22 @@ function attachHandlers(){
     });
   });
 
+  // Troca de papel/regime na ficha do admin: reage na hora, sem precisar salvar
+  const pessoaPapelSelect = document.getElementById('pessoa-papel');
+  if(pessoaPapelSelect){
+    pessoaPapelSelect.addEventListener('change', ()=>{
+      state.pessoaEditPapel = pessoaPapelSelect.value;
+      render();
+    });
+  }
+  const pessoaRegimeSelect = document.getElementById('pessoa-regime');
+  if(pessoaRegimeSelect){
+    pessoaRegimeSelect.addEventListener('change', ()=>{
+      state.pessoaEditRegime = pessoaRegimeSelect.value;
+      render();
+    });
+  }
+
   // Busca e filtros do painel do admin: atualiza só a lista, sem redesenhar
   // a tela toda (senão o campo de busca perde o foco a cada letra digitada)
   const buscaInput = document.getElementById('admin-busca');
@@ -1739,6 +1801,8 @@ async function handleAction(action, id){
 
   if(action==='editar-pessoa'){
     state.pessoaModoEdicao = true;
+    state.pessoaEditPapel = state.pessoaSelecionada.papel;
+    state.pessoaEditRegime = state.pessoaSelecionada.status_pagamento === 'gratuidade' ? 'gratuidade' : 'mensalidade';
     return render();
   }
 
@@ -1762,13 +1826,31 @@ async function handleAction(action, id){
     document.querySelectorAll('.pessoa-grad-select').forEach(sel=>{
       graduacoes[sel.dataset.modalidade] = sel.value;
     });
-    const planoEl = document.getElementById('pessoa-plano');
-    const plano_id = planoEl ? (planoEl.value || null) : undefined;
 
     if(!nome || !unidade || modalidades.length===0){ state.error='Preencha nome, unidade e ao menos uma modalidade.'; return render(); }
 
+    const p = state.pessoaSelecionada;
     const dadosUpdate = { nome, data_nascimento: nasc || null, unidade, modalidades, papel, status, graduacoes };
-    if(plano_id !== undefined) dadosUpdate.plano_id = plano_id;
+
+    if(papel === 'aluno'){
+      const planoEl = document.getElementById('pessoa-plano');
+      dadosUpdate.plano_id = planoEl ? (planoEl.value || null) : null;
+    } else if(papel === 'professor'){
+      const regimeEl = document.getElementById('pessoa-regime');
+      const regime = regimeEl ? regimeEl.value : 'gratuidade';
+      if(regime === 'gratuidade'){
+        dadosUpdate.status_pagamento = 'gratuidade';
+        dadosUpdate.plano_id = null;
+        dadosUpdate.metodo_pagamento = null;
+        dadosUpdate.dia_vencimento = null;
+      } else {
+        const planoEl = document.getElementById('pessoa-plano');
+        dadosUpdate.plano_id = planoEl ? (planoEl.value || null) : null;
+        if(p.status_pagamento === 'gratuidade' || !p.status_pagamento){
+          dadosUpdate.status_pagamento = 'pendente_pagamento';
+        }
+      }
+    }
 
     const { data: atualizado, error } = await supabaseClient.from('profiles').update(dadosUpdate)
       .eq('id', id).select().single();
@@ -1982,7 +2064,7 @@ async function handleAction(action, id){
   }
 
   if(action==='voltar-pagar-mensalidade'){
-    return go('student');
+    return go(telaDoUsuarioAgora());
   }
 
   if(action==='pagar-mensal'){

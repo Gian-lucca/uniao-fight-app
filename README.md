@@ -67,8 +67,12 @@ uniao-fight-app/
   formas de pagamento, sem mudar o dia de vencimento já fixado). Só o
   administrador escolhe/edita qual plano cada aluno pertence. No painel do
   admin, tudo isso fica dentro de "💰 Financeiro", que se divide em
-  **Planos** (editar nome/preço) e **Mensalidades** (lista de alunos por
-  unidade com o status Pago/Pendente, filtrável por unidade e status)
+  **Planos** (editar nome/preço) e **Mensalidades** (lista de alunos e
+  professores por unidade com o status Pago/Pendente/Gratuidade, filtrável
+  por unidade e status). Professores nascem isentos (gratuidade) por padrão,
+  mas o administrador pode trocar o regime de qualquer professor pra
+  "mensalidade" na ficha da pessoa — aí ele passa a ter plano, selo de
+  pagamento e botão de pagar mensalidade igual um aluno
 
 ## Configuração (resumo)
 

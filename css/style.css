@@ -133,11 +133,11 @@
   .plano-list{ display:flex; flex-direction:column; gap:10px; }
   .plano-card{
     display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center;
-    background:var(--panel-2); border:1px solid var(--line); padding:16px; cursor:pointer; width:100%;
+    background:var(--panel-2); border:1px solid var(--line); padding:16px; cursor:pointer; width:100%; color: #fff;
   }
   .plano-card:hover{ border-color:var(--yellow); }
   .plano-card.selecionado{ border-color:var(--yellow); background:rgba(247,181,0,.08); }
-  .plano-nome{ font-family:'Oswald'; font-size:14px; text-transform:uppercase; letter-spacing:.02em; }
+  .plano-nome{ font-family:'Oswald'; font-size:14px; text-transform:uppercase; letter-spacing:.02em; color: #fff; }
   .plano-preco{ font-family:'Oswald'; font-size:20px; color:var(--yellow); }
   .plano-mes{ font-size:11px; color:var(--muted); margin-left:2px; }
 
@@ -250,6 +250,7 @@
   }
   .pay-badge-pago{ background:rgba(74,124,89,.15); border-color:var(--green); color:var(--green); }
   .pay-badge-pendente{ background:rgba(200,16,46,.12); border-color:#c8102e; color:#f2b6bf; }
+  .pay-badge-gratuidade{ background:rgba(154,154,154,.1); border-color:var(--muted); color:var(--muted); }
 
   .plano-readonly{
     padding:11px 12px; background:var(--panel-2); border:1px solid var(--line);
@@ -345,6 +346,7 @@
   .pay-pago{ border-color:var(--green); color:var(--green); }
   .pay-mestre{ border-color:var(--yellow); color:var(--yellow); }
   .pay-pendente-tag{ border-color:#c8102e; color:#f2b6bf; }
+  .pay-gratuidade{ border-color:var(--muted); color:var(--muted); }
   .req-actions{ display:flex; gap:8px; }
   .req-actions button{
     flex:1; padding:8px; font-size:12px; font-family:'Oswald'; font-weight:600;
