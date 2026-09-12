@@ -50,7 +50,10 @@ const state = {
   cronogramaTrilhaAdmin: 'geral', // aba selecionada na tela do admin
   cronogramaEditando: null,       // linha em edição, ou null = criando nova
   cronogramaTrilhaView: 'geral',  // aba selecionada na tela de visualização (aluno/professor)
-  diaCronogramaSelecionado: null  // dia da semana (0-6) clicado no calendário do aluno
+  diaCronogramaSelecionado: null, // dia da semana (0-6) clicado no calendário do aluno
+
+  // --- professor: treinar ou dar aula ---
+  professorModo: null  // null | 'aula' | 'treino'
 };
 
 /* ---------------- HELPERS ---------------- */
@@ -75,6 +78,13 @@ function pwChecklist(pw){
   ];
 }
 function pwIsStrong(pw){ return pwChecklist(pw).every(r=>r.ok); }
+
+function telaDoUsuarioAgora(){
+  const u = state.currentUser;
+  if(u.papel === 'administrador') return 'admin';
+  if(u.papel === 'professor') return state.professorModo === 'treino' ? 'professor-treino' : 'teacher';
+  return 'student';
+}
 
 function go(screen){ state.screen = screen; state.error=''; render(); }
 
@@ -147,6 +157,8 @@ function renderScreen(){
     case 'ver-cronograma': return verCronogramaView();
     case 'student': return studentView();
     case 'teacher': return teacherView();
+    case 'professor-escolha': return professorEscolhaView();
+    case 'professor-treino': return professorTreinoView();
     case 'editar-perfil': return editarPerfilView();
     default: return homeView();
   }
@@ -805,9 +817,109 @@ function teacherView(){
       <div class="profile-name">${u.nome}</div>
       <div class="profile-meta">Professor · ${(u.modalidades||[]).join(', ')} · Unidade ${u.unidade}</div>
     </div>
-    <button class="btn btn-ghost" data-action="go-ver-cronograma" style="margin-bottom:18px;">🗓️ Cronograma da semana</button>
+    <div class="admin-shortcuts">
+      <button class="shortcut-card" data-action="go-ver-cronograma">
+        <span class="shortcut-icon">🗓️</span>
+        <span class="shortcut-label">Cronograma</span>
+      </button>
+      <button class="shortcut-card" data-action="professor-modo" data-id="treino">
+        <span class="shortcut-icon">🥋</span>
+        <span class="shortcut-label">Registrar treino</span>
+      </button>
+    </div>
     <div class="section-label">Seus alunos</div>
     ${alunosItems}
+  </div>
+  ${comunicadoModalView()}`;
+}
+
+function professorEscolhaView(){
+  const u = state.currentUser;
+  const primeiroNome = u.nome.split(' ')[0];
+  return `
+  <div class="screen home">
+    <div class="corner-tape"></div>
+    <div class="home-center" style="max-width:320px;">
+      <div class="team-tag" style="margin-bottom:4px;">Bem-vindo,</div>
+      <h1 class="team-name" style="font-size:24px; margin-bottom:8px;">${primeiroNome}</h1>
+      <div class="team-tag" style="margin-bottom:28px;">O que você vai fazer hoje?</div>
+
+      <div class="escolha-cards">
+        <button class="escolha-card" data-action="professor-modo" data-id="aula">
+          <span class="escolha-icon">📋</span>
+          <span class="escolha-titulo">Dar aula</span>
+          <span class="escolha-sub">Ver seus alunos e o cronograma</span>
+        </button>
+        <button class="escolha-card" data-action="professor-modo" data-id="treino">
+          <span class="escolha-icon">🥋</span>
+          <span class="escolha-titulo">Treinar</span>
+          <span class="escolha-sub">Registrar sua própria presença</span>
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function professorTreinoView(){
+  const u = state.currentUser;
+  const modalidades = u.modalidades || [];
+
+  const gradBadges = modalidades.map(m=>`
+    <div class="grad-tag">${m}: ${(u.graduacoes && u.graduacoes[m]) || 'a definir'}</div>
+  `).join('');
+
+  let statusHtml = '';
+  if(state.presencaStatus === 'buscando'){
+    statusHtml = `<div class="presenca-status">Buscando sua localização...</div>`;
+  } else if(state.presencaStatus === 'ok'){
+    statusHtml = `<div class="presenca-status ok">Presença registrada!<div class="presenca-endereco">${state.presencaMsg}</div></div>`;
+  } else if(state.presencaStatus === 'erro'){
+    statusHtml = `<div class="presenca-status erro">${state.presencaMsg}</div>`;
+  }
+
+  const hoje = new Date();
+  const hojeKey = dataKey(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  const jaRegistrouHoje = !!state.presencas[hojeKey];
+
+  const seletorModalidade = modalidades.length > 1 ? `
+    <div class="field">
+      <label>Modalidade de hoje</label>
+      <select id="presenca-modalidade">
+        ${modalidades.map(m=>`<option value="${m}">${m}</option>`).join('')}
+      </select>
+    </div>` : '';
+
+  return `
+  <div class="screen">
+    <div class="top-bar">
+      <h2>Meu treino</h2>
+      <button data-action="logout">Sair</button>
+    </div>
+    <div class="profile-card">
+      <button class="profile-edit-btn" data-action="go-editar-perfil" title="Editar perfil">✏️</button>
+      <div class="profile-name">${u.nome}</div>
+      <div class="profile-meta">
+        Professor (treinando) · Unidade ${u.unidade}<br>
+        Modalidades: ${modalidades.join(', ')}
+      </div>
+      <div class="grad-tags-wrap">${gradBadges}</div>
+    </div>
+
+    <div class="admin-shortcuts">
+      <button class="shortcut-card" data-action="professor-modo" data-id="aula">
+        <span class="shortcut-icon">📋</span>
+        <span class="shortcut-label">Voltar pro modo professor</span>
+      </button>
+    </div>
+
+    ${buildCalendarHTML()}
+    ${painelDiaCronograma()}
+
+    ${seletorModalidade}
+    <button class="btn-presenca" data-action="registrar-presenca" ${jaRegistrouHoje || state.presencaStatus==='buscando' ? 'disabled' : ''}>
+      ${jaRegistrouHoje ? 'Presença já registrada hoje' : 'Registrar presença'}
+    </button>
+    ${statusHtml}
   </div>
   ${comunicadoModalView()}`;
 }
@@ -1109,6 +1221,7 @@ async function handleAction(action, id){
   if(action==='logout'){
     await supabaseClient.auth.signOut();
     state.currentUser = null;
+    state.professorModo = null;
     return go('home');
   }
 
@@ -1142,8 +1255,10 @@ async function handleAction(action, id){
     if(perfil.papel==='professor'){
       await carregarAlunosDoProfessor();
       await carregarComunicadosNaoLidos();
+      await carregarCronograma();
       assinarNovosComunicados();
-      return go('teacher');
+      state.professorModo = null;
+      return go('professor-escolha');
     }
     await carregarPresencasDoMes();
     await carregarComunicadosNaoLidos();
@@ -1311,7 +1426,17 @@ async function handleAction(action, id){
   }
 
   if(action==='voltar-editar-perfil'){
-    return go(state.currentUser.papel === 'professor' ? 'teacher' : 'student');
+    return go(telaDoUsuarioAgora());
+  }
+
+  if(action==='professor-modo'){
+    state.professorModo = id;
+    if(id === 'treino'){
+      await carregarPresencasDoMes();
+      if(!state.cronogramaTodos.length) await carregarCronograma();
+      return go('professor-treino');
+    }
+    return go('teacher');
   }
 
   if(action==='salvar-meu-perfil'){
@@ -1337,7 +1462,7 @@ async function handleAction(action, id){
       .from('profiles').select('*').eq('id', state.currentUser.id).single();
     state.currentUser = perfilAtualizado;
 
-    return go(state.currentUser.papel === 'professor' ? 'teacher' : 'student');
+    return go(telaDoUsuarioAgora());
   }
 
   if(action==='go-comunicados'){
@@ -1511,8 +1636,10 @@ async function handleAction(action, id){
     else if(perfil.papel==='professor'){
       await carregarAlunosDoProfessor();
       await carregarComunicadosNaoLidos();
+      await carregarCronograma();
       assinarNovosComunicados();
-      state.screen='teacher';
+      state.professorModo = null;
+      state.screen='professor-escolha';
     }
     else {
       await carregarPresencasDoMes();
