@@ -56,6 +56,19 @@ uniao-fight-app/
   unidade específica ou a todas), aparece em modal para quem ainda não
   fechou aquele comunicado; novo comunicado chega em tempo real pra quem já
   está com o app aberto
+- **Planos e pagamento (protótipo visual, ainda sem gateway real)** — ao se
+  cadastrar, o aluno escolhe um dos 3 planos (editáveis pelo admin em
+  "💰 Planos") e a forma de pagamento: Pix, cartão de crédito, cartão de
+  débito, ou "Liberação do Mestre". Pagando, gera um comprovante para
+  download e o vencimento mensal fica fixado no dia do primeiro pagamento.
+  O painel do admin mostra se cada solicitação pendente já foi paga ou está
+  aguardando liberação do Mestre. O aluno vê um selo "Pago"/"Pendente" no
+  próprio card e tem um botão para pagar a mensalidade recorrente (mesmas
+  formas de pagamento, sem mudar o dia de vencimento já fixado). Só o
+  administrador escolhe/edita qual plano cada aluno pertence. No painel do
+  admin, tudo isso fica dentro de "💰 Financeiro", que se divide em
+  **Planos** (editar nome/preço) e **Mensalidades** (lista de alunos por
+  unidade com o status Pago/Pendente, filtrável por unidade e status)
 
 ## Configuração (resumo)
 

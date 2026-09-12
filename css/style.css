@@ -129,6 +129,41 @@
   .comunicado-modal-img{ width:100%; max-height:100%; object-fit:cover; margin-bottom:14px; }
   .comunicado-modal p.comunicado-corpo{ font-size:13.5px; line-height:1.6; color:var(--text); white-space:pre-wrap; }
 
+  /* ---------- PAGAMENTO / PLANOS ---------- */
+  .plano-list{ display:flex; flex-direction:column; gap:10px; }
+  .plano-card{
+    display:flex; flex-direction:column; align-items:center; gap:4px; text-align:center;
+    background:var(--panel-2); border:1px solid var(--line); padding:16px; cursor:pointer; width:100%;
+  }
+  .plano-card:hover{ border-color:var(--yellow); }
+  .plano-card.selecionado{ border-color:var(--yellow); background:rgba(247,181,0,.08); }
+  .plano-nome{ font-family:'Oswald'; font-size:14px; text-transform:uppercase; letter-spacing:.02em; }
+  .plano-preco{ font-family:'Oswald'; font-size:20px; color:var(--yellow); }
+  .plano-mes{ font-size:11px; color:var(--muted); margin-left:2px; }
+
+  .metodo-list{ display:flex; flex-direction:column; gap:8px; }
+  .metodo-card{
+    background:var(--panel-2); border:1px solid var(--line); padding:13px; text-align:left;
+    font-family:'Inter'; font-size:14px; color:var(--text); cursor:pointer;
+  }
+  .metodo-card:hover{ border-color:var(--yellow); }
+  .metodo-mestre{ border-style:dashed; color:var(--muted); }
+
+  .comprovante-box{
+    background:var(--panel-2); border:1px solid var(--green); padding:24px; text-align:center; margin-bottom:20px;
+  }
+  .comprovante-check{
+    width:44px; height:44px; border-radius:50%; background:var(--green); color:#fff;
+    display:flex; align-items:center; justify-content:center; font-size:22px; margin:0 auto 14px;
+  }
+  .comprovante-valor{ font-family:'Oswald'; font-size:26px; color:var(--yellow); }
+  .comprovante-linhas{ margin-top:18px; text-align:left; }
+  .comprovante-linhas div{
+    display:flex; justify-content:space-between; padding:8px 0; border-bottom:1px solid var(--line);
+    font-size:12.5px; color:var(--muted);
+  }
+  .comprovante-linhas div span:last-child{ color:var(--text); font-weight:500; }
+
   /* ---------- ABAS DE TRILHA ---------- */
   .trilha-tabs{ display:flex; gap:8px; }
   .trilha-tab{
@@ -207,6 +242,19 @@
     padding:0;
   }
   .profile-edit-btn:hover{ border-color:var(--yellow); }
+
+  .pay-badge{
+    position:absolute; top:14px; right:14px; z-index:1;
+    font-family:'Oswald'; font-size:11px; text-transform:uppercase; letter-spacing:.03em;
+    padding:4px 10px; border:1px solid;
+  }
+  .pay-badge-pago{ background:rgba(74,124,89,.15); border-color:var(--green); color:var(--green); }
+  .pay-badge-pendente{ background:rgba(200,16,46,.12); border-color:#c8102e; color:#f2b6bf; }
+
+  .plano-readonly{
+    padding:11px 12px; background:var(--panel-2); border:1px solid var(--line);
+    color:var(--muted); font-size:13.5px;
+  }
   .profile-name{ font-family:'Oswald'; font-size:19px; text-transform:uppercase; margin-bottom:6px; }
   .profile-meta{ font-size:12.5px; color:var(--muted); line-height:1.7; }
   .grad-tag{
@@ -215,17 +263,17 @@
   }
 
   /* ---------- ATALHOS DO PAINEL DO ADMIN ---------- */
-  .admin-shortcuts{ display:flex; gap:10px; margin-bottom:22px; }
+  .admin-shortcuts{ display:flex; gap:8px; margin-bottom:22px; }
   .shortcut-card{
     flex:1; display:flex; flex-direction:column; align-items:center; gap:6px;
-    background:var(--panel-2); border:1px solid var(--line); padding:16px 8px;
-    cursor:pointer;
+    background:var(--panel-2); border:1px solid var(--line); padding:14px 4px;
+    cursor:pointer; min-width:0;
   }
   .shortcut-card:hover{ border-color:var(--yellow); }
   .shortcut-icon{ font-size:22px; }
   .shortcut-label{
-    font-family:'Oswald'; font-size:12px; text-transform:uppercase; letter-spacing:.03em;
-    color:var(--text); text-align:center;
+    font-family:'Oswald'; font-size:11px; text-transform:uppercase; letter-spacing:.02em;
+    color:var(--text); text-align:center; line-height:1.2;
   }
 
   /* ---------- ESCOLHA DO PROFESSOR (treinar ou dar aula) ---------- */
@@ -290,6 +338,13 @@
   }
   .req-item .rn{ font-family:'Oswald'; font-size:15.5px; text-transform:uppercase; }
   .req-item .rm{ font-size:12px; color:var(--muted); margin:4px 0 10px; }
+  .pay-tag{
+    display:inline-block; font-size:11px; padding:3px 8px; margin-bottom:10px;
+    border:1px solid var(--line); text-transform:uppercase; letter-spacing:.03em;
+  }
+  .pay-pago{ border-color:var(--green); color:var(--green); }
+  .pay-mestre{ border-color:var(--yellow); color:var(--yellow); }
+  .pay-pendente-tag{ border-color:#c8102e; color:#f2b6bf; }
   .req-actions{ display:flex; gap:8px; }
   .req-actions button{
     flex:1; padding:8px; font-size:12px; font-family:'Oswald'; font-weight:600;

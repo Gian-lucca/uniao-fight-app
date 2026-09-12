@@ -53,7 +53,16 @@ const state = {
   diaCronogramaSelecionado: null, // dia da semana (0-6) clicado no calendário do aluno
 
   // --- professor: treinar ou dar aula ---
-  professorModo: null  // null | 'aula' | 'treino'
+  professorModo: null, // null | 'aula' | 'treino'
+
+  // --- financeiro / pagamento ---
+  planos: [],
+  planoEscolhido: null,
+  planoEditando: null,
+  pagamentoProcessando: false,
+  comprovanteDados: null,
+  finFiltroUnidade: '',
+  finFiltroStatus: ''
 };
 
 /* ---------------- HELPERS ---------------- */
@@ -159,6 +168,12 @@ function renderScreen(){
     case 'teacher': return teacherView();
     case 'professor-escolha': return professorEscolhaView();
     case 'professor-treino': return professorTreinoView();
+    case 'pagamento': return pagamentoView();
+    case 'pagar-mensalidade': return pagarMensalidadeView();
+    case 'admin-planos': return adminPlanosView();
+    case 'plano-form': return planoFormView();
+    case 'admin-financeiro': return adminFinanceiroView();
+    case 'admin-mensalidades': return adminMensalidadesView();
     case 'editar-perfil': return editarPerfilView();
     default: return homeView();
   }
@@ -262,14 +277,249 @@ function signupView(){
   </div>`;
 }
 
+function nomeMetodoPagamento(m){
+  return { pix:'Pix', credito:'Cartão de crédito', debito:'Cartão de débito', liberacao_mestre:'Liberação do Mestre' }[m] || m;
+}
+
+function formatarPreco(v){
+  return 'R$ ' + Number(v).toFixed(2).replace('.', ',');
+}
+
+function planoNome(planoId){
+  const p = state.planos.find(pl=>pl.id===planoId);
+  return p ? `${p.nome} · ${formatarPreco(p.preco)}/mês` : 'Ainda não definido pelo administrador';
+}
+
+function pagamentoView(){
+  const planosHtml = state.planos.map(p=>`
+    <button class="plano-card ${state.planoEscolhido===p.id ? 'selecionado':''}" data-action="escolher-plano" data-id="${p.id}">
+      <div class="plano-nome">${p.nome}</div>
+      <div class="plano-preco">${formatarPreco(p.preco)}<span class="plano-mes">/mês</span></div>
+      ${p.descricao ? `<div class="sm">${p.descricao}</div>` : ''}
+    </button>`).join('');
+
+  const metodosHtml = state.planoEscolhido ? `
+    <div class="section-label" style="margin-top:24px;">Forma de pagamento</div>
+    <div class="metodo-list">
+      <button class="metodo-card" data-action="pagar" data-id="pix">🔑 Pix</button>
+      <button class="metodo-card" data-action="pagar" data-id="credito">💳 Cartão de crédito</button>
+      <button class="metodo-card" data-action="pagar" data-id="debito">💳 Cartão de débito</button>
+      <button class="metodo-card metodo-mestre" data-action="pagar" data-id="liberacao_mestre">🥋 Liberação do Mestre</button>
+    </div>` : '';
+
+  return `
+  <div class="screen">
+    <div class="top-bar">
+      <h2>Pagamento</h2>
+      <button data-action="logout">Sair</button>
+    </div>
+    ${state.error ? `<div class="error-msg">${state.error}</div>` : ''}
+    <div class="section-label">Escolha seu plano</div>
+    <div class="plano-list">${planosHtml}</div>
+    ${metodosHtml}
+    ${state.pagamentoProcessando ? `<div class="presenca-status" style="margin-top:16px;">Processando pagamento...</div>` : ''}
+  </div>
+  ${comprovanteModalView()}`;
+}
+
+function pagarMensalidadeView(){
+  const u = state.currentUser;
+  const plano = state.planos.find(p=>p.id===u.plano_id);
+
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="voltar-pagar-mensalidade">←</button>
+      <h2>Pagar mensalidade</h2>
+    </div>
+    ${state.error ? `<div class="error-msg">${state.error}</div>` : ''}
+    <div class="plano-card selecionado" style="margin-bottom:20px; cursor:default;">
+      <div class="plano-nome">${plano ? plano.nome : 'Plano não definido'}</div>
+      ${plano
+        ? `<div class="plano-preco">${formatarPreco(plano.preco)}<span class="plano-mes">/mês</span></div>`
+        : `<div class="sm">Fale com o administrador para definir seu plano.</div>`}
+    </div>
+    ${plano ? `
+    <div class="section-label">Forma de pagamento</div>
+    <div class="metodo-list">
+      <button class="metodo-card" data-action="pagar-mensal" data-id="pix">🔑 Pix</button>
+      <button class="metodo-card" data-action="pagar-mensal" data-id="credito">💳 Cartão de crédito</button>
+      <button class="metodo-card" data-action="pagar-mensal" data-id="debito">💳 Cartão de débito</button>
+    </div>` : ''}
+    ${state.pagamentoProcessando ? `<div class="presenca-status" style="margin-top:16px;">Processando pagamento...</div>` : ''}
+  </div>
+  ${comprovanteModalView()}`;
+}
+
+function comprovanteModalView(){
+  const c = state.comprovanteDados;
+  if(!c) return '';
+  return `
+  <div class="modal-overlay">
+    <div class="modal-box">
+      <h3>Pagamento confirmado</h3>
+      <div class="comprovante-box" style="border:none; padding:0; margin-bottom:16px;">
+        <div class="comprovante-check">✓</div>
+        <div class="comprovante-valor">${formatarPreco(c.preco)}</div>
+        <div class="sm">${c.plano}</div>
+        <div class="comprovante-linhas">
+          <div><span>Aluno</span><span>${c.nome}</span></div>
+          <div><span>Método</span><span>${nomeMetodoPagamento(c.metodo)}</span></div>
+          <div><span>Data</span><span>${c.data.toLocaleDateString('pt-BR')}</span></div>
+          <div><span>Vencimento mensal</span><span>Todo dia ${c.diaVencimento}</span></div>
+        </div>
+      </div>
+      <div class="modal-actions">
+        <button class="btn-reject" data-action="baixar-comprovante">📥 Baixar</button>
+        <button class="btn-approve" data-action="go-pending">Continuar</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function adminFinanceiroView(){
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="voltar-admin-financeiro">←</button>
+      <h2>Financeiro</h2>
+    </div>
+    <div class="admin-shortcuts">
+      <button class="shortcut-card" data-action="go-planos">
+        <span class="shortcut-icon">📋</span>
+        <span class="shortcut-label">Planos</span>
+      </button>
+      <button class="shortcut-card" data-action="go-mensalidades">
+        <span class="shortcut-icon">💳</span>
+        <span class="shortcut-label">Mensalidades</span>
+      </button>
+    </div>
+  </div>`;
+}
+
+function alunosFinanceiroFiltrados(){
+  return state.aprovados.filter(u=>{
+    if(u.papel !== 'aluno') return false;
+    if(state.finFiltroUnidade && u.unidade !== state.finFiltroUnidade) return false;
+    if(state.finFiltroStatus === 'pago' && u.status_pagamento !== 'pago') return false;
+    if(state.finFiltroStatus === 'pendente' && u.status_pagamento === 'pago') return false;
+    return true;
+  });
+}
+
+function adminMensalidadesView(){
+  const alunos = alunosFinanceiroFiltrados();
+  const UNIDADES = state.finFiltroUnidade ? [state.finFiltroUnidade] : ['Anchieta','Ricardo'];
+
+  const gruposHtml = UNIDADES.map(unidade=>{
+    const doGrupo = alunos.filter(u=>u.unidade===unidade);
+    if(!doGrupo.length) return '';
+    const linhas = doGrupo.map(u=>`
+      <div class="stud-row clickable" data-action="abrir-pessoa" data-id="${u.id}">
+        <div>${u.nome}<div class="sm">${planoNome(u.plano_id)}</div></div>
+        <div class="pay-tag ${u.status_pagamento==='pago' ? 'pay-pago' : 'pay-pendente-tag'}" style="margin-bottom:0;">
+          ${u.status_pagamento==='pago' ? 'Pago' : 'Pendente'}
+        </div>
+      </div>`).join('');
+    return `
+      <div class="unidade-group">
+        <div class="unidade-label">Unidade ${unidade}</div>
+        ${linhas}
+      </div>`;
+  }).join('');
+
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="voltar-financeiro-mensalidades">←</button>
+      <h2>Mensalidades</h2>
+    </div>
+    <div class="admin-filtros">
+      <div class="admin-filtros-row">
+        <select id="fin-filtro-unidade">
+          <option value="">Todas as unidades</option>
+          <option value="Anchieta" ${state.finFiltroUnidade==='Anchieta'?'selected':''}>Anchieta</option>
+          <option value="Ricardo" ${state.finFiltroUnidade==='Ricardo'?'selected':''}>Ricardo</option>
+        </select>
+        <select id="fin-filtro-status">
+          <option value="">Todos os status</option>
+          <option value="pago" ${state.finFiltroStatus==='pago'?'selected':''}>Pago</option>
+          <option value="pendente" ${state.finFiltroStatus==='pendente'?'selected':''}>Pendente</option>
+        </select>
+      </div>
+    </div>
+    ${gruposHtml.trim() ? gruposHtml : `<div class="empty-note">Nenhum aluno encontrado com esse filtro.</div>`}
+  </div>`;
+}
+
+function adminPlanosView(){
+  const itens = state.planos.map(p=>`
+    <div class="cron-item">
+      <div class="cron-info">
+        <div class="cron-atividade">${p.nome}</div>
+        <div class="sm">${formatarPreco(p.preco)}/mês${p.descricao ? ' · '+p.descricao : ''}</div>
+      </div>
+      <div class="cron-actions">
+        <button class="icon-btn" data-action="editar-plano" data-id="${p.id}" title="Editar">✏️</button>
+      </div>
+    </div>`).join('');
+
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="voltar-admin-planos">←</button>
+      <h2>Planos</h2>
+    </div>
+    ${itens || `<div class="empty-note">Nenhum plano cadastrado.</div>`}
+  </div>`;
+}
+
+function planoFormView(){
+  const p = state.planoEditando;
+  if(!p) return `<div class="screen"><div class="empty-note">Plano não encontrado.</div></div>`;
+  return `
+  <div class="screen">
+    <div class="back-row">
+      <button data-action="go-planos">←</button>
+      <h2>Editar plano</h2>
+    </div>
+    ${state.error ? `<div class="error-msg">${state.error}</div>` : ''}
+    <div class="field">
+      <label>Nome do plano</label>
+      <input id="plano-nome" type="text" value="${p.nome}">
+    </div>
+    <div class="field">
+      <label>Preço mensal (R$)</label>
+      <input id="plano-preco" type="number" step="0.01" value="${p.preco}">
+    </div>
+    <div class="field">
+      <label>Descrição (opcional)</label>
+      <input id="plano-descricao" type="text" value="${p.descricao || ''}">
+    </div>
+    <button class="btn btn-primary" data-action="salvar-plano" data-id="${p.id}" ${state.loading ? 'disabled' : ''}>
+      ${state.loading ? 'Salvando...' : 'Salvar'}
+    </button>
+  </div>`;
+}
+
 function pendingView(){
+  const u = state.currentUser;
+  const statusPagamento = u ? u.status_pagamento : null;
+
+  let mensagem = 'Seu acesso está em análise. Assim que o administrador liberar, você poderá entrar normalmente.';
+  if(statusPagamento === 'pago'){
+    mensagem = 'Pagamento confirmado! Seu acesso está em análise final do administrador.';
+  } else if(statusPagamento === 'liberacao_mestre'){
+    mensagem = 'Solicitação enviada ao Mestre. Assim que ele aprovar, você poderá entrar normalmente.';
+  }
+
   return `
   <div class="screen">
     <div class="pending-wrap">
       <div class="pending-icon"></div>
       <h2 style="font-size:19px; text-transform:uppercase; margin-bottom:10px;">Cadastro enviado</h2>
       <p style="color:var(--muted); font-size:13.5px; line-height:1.6; max-width:260px;">
-        Seu acesso está em análise. Assim que o administrador liberar, você poderá entrar normalmente.
+        ${mensagem}
       </p>
       <button class="btn btn-ghost" data-action="go-home" style="margin-top:26px; max-width:200px;">Voltar ao início</button>
     </div>
@@ -340,15 +590,23 @@ function atualizarEquipeAprovada(){
 function adminView(){
   const pend = state.pendentes;
 
-  const pendItems = pend.length ? pend.map(u=>`
+  const pendItems = pend.length ? pend.map(u=>{
+    const tagPagamento = u.status_pagamento === 'pago'
+      ? `<span class="pay-tag pay-pago">💰 Pago</span>`
+      : u.status_pagamento === 'liberacao_mestre'
+      ? `<span class="pay-tag pay-mestre">🥋 Aguardando Mestre</span>`
+      : '';
+    return `
     <div class="req-item">
       <div class="rn">${u.nome}</div>
       <div class="rm">${u.papel === 'aluno' ? 'Aluno' : 'Professor'} · ${(u.modalidades||[]).join(', ')} · Unidade ${u.unidade}</div>
+      ${tagPagamento}
       <div class="req-actions">
         <button class="btn-approve" data-action="open-approve" data-id="${u.id}">Aprovar</button>
         <button class="btn-reject" data-action="reject" data-id="${u.id}">Recusar</button>
       </div>
-    </div>`).join('') : `<div class="empty-note">Nenhuma solicitação pendente.</div>`;
+    </div>`;
+  }).join('') : `<div class="empty-note">Nenhuma solicitação pendente.</div>`;
 
   return `
   <div class="screen">
@@ -364,6 +622,10 @@ function adminView(){
       <button class="shortcut-card" data-action="go-cronograma-admin">
         <span class="shortcut-icon">🗓️</span>
         <span class="shortcut-label">Cronograma</span>
+      </button>
+      <button class="shortcut-card" data-action="go-financeiro">
+        <span class="shortcut-icon">💰</span>
+        <span class="shortcut-label">Financeiro</span>
       </button>
     </div>
     <div class="section-label">Solicitações pendentes (${pend.length})</div>
@@ -620,6 +882,15 @@ function adminPersonView(){
       <div class="grad-tag">${m.toUpperCase()}: ${(p.graduacoes && p.graduacoes[m]) || 'a definir'}</div>
     `).join('');
 
+    const financeiroSection = p.papel === 'aluno' ? `
+      <div class="section-label" style="margin-top:20px;">Financeiro</div>
+      <div class="stud-row">
+        <div>Plano<div class="sm">${planoNome(p.plano_id)}</div></div>
+        <div class="pay-tag ${p.status_pagamento==='pago' ? 'pay-pago' : p.status_pagamento==='liberacao_mestre' ? 'pay-mestre' : ''}" style="margin-bottom:0;">
+          ${p.status_pagamento==='pago' ? '💰 Pago' : p.status_pagamento==='liberacao_mestre' ? '🥋 Liberação do Mestre' : 'Pendente'}
+        </div>
+      </div>` : '';
+
     return `
     <div class="screen">
       <div class="back-row">
@@ -635,6 +906,7 @@ function adminPersonView(){
         </div>
         <div class="grad-tags-wrap">${gradBadges}</div>
       </div>
+      ${financeiroSection}
       ${presencaSection}
     </div>`;
   }
@@ -686,6 +958,14 @@ function adminPersonView(){
       <div class="check-list">${modalidadeChecks}</div>
     </div>
     ${graduacaoSelects}
+    ${p.papel === 'aluno' ? `
+    <div class="field">
+      <label>Plano</label>
+      <select id="pessoa-plano">
+        <option value="">Nenhum definido</option>
+        ${state.planos.map(pl=>`<option value="${pl.id}" ${p.plano_id===pl.id?'selected':''}>${pl.nome} · ${formatarPreco(pl.preco)}</option>`).join('')}
+      </select>
+    </div>` : ''}
     <div class="field">
       <label>Papel</label>
       <select id="pessoa-papel">
@@ -769,6 +1049,9 @@ function studentView(){
       </select>
     </div>` : '';
 
+  const pago = u.status_pagamento === 'pago';
+  const badgePagamento = `<div class="pay-badge ${pago ? 'pay-badge-pago' : 'pay-badge-pendente'}">${pago ? 'Pago' : 'Pendente'}</div>`;
+
   return `
   <div class="screen">
     <div class="top-bar">
@@ -776,6 +1059,7 @@ function studentView(){
       <button data-action="logout">Sair</button>
     </div>
     <div class="profile-card">
+      ${badgePagamento}
       <button class="profile-edit-btn" data-action="go-editar-perfil" title="Editar perfil">✏️</button>
       <div class="profile-name">${u.nome}</div>
       <div class="profile-meta">
@@ -783,6 +1067,13 @@ function studentView(){
         Modalidades: ${modalidades.join(', ')}
       </div>
       <div class="grad-tags-wrap">${gradBadges}</div>
+    </div>
+
+    <div class="admin-shortcuts">
+      <button class="shortcut-card" data-action="go-pagar-mensalidade">
+        <span class="shortcut-icon">💳</span>
+        <span class="shortcut-label">Pagar mensalidade</span>
+      </button>
     </div>
 
     ${buildCalendarHTML()}
@@ -958,7 +1249,12 @@ function editarPerfilView(){
       <label>Modalidade(s)</label>
       <div class="check-list">${modalidadeChecks}</div>
     </div>
-    <div class="empty-note" style="margin-bottom:16px;">Papel, status e graduação só podem ser alterados pelo administrador.</div>
+    ${u.papel === 'aluno' ? `
+    <div class="field">
+      <label>Plano</label>
+      <div class="plano-readonly">${planoNome(u.plano_id)}</div>
+    </div>` : ''}
+    <div class="empty-note" style="margin-bottom:16px;">Papel, status, graduação e plano só podem ser alterados pelo administrador.</div>
     <button class="btn btn-primary" data-action="salvar-meu-perfil" ${state.loading ? 'disabled' : ''}>
       ${state.loading ? 'Salvando...' : 'Salvar alterações'}
     </button>
@@ -987,6 +1283,45 @@ async function carregarAlunosDoProfessor(){
     .overlaps('modalidades', u.modalidades || []);
   state.alunosDoProfessor = data || [];
   render();
+}
+
+async function carregarPlanos(){
+  const { data } = await supabaseClient
+    .from('planos').select('*').eq('ativo', true).order('preco', { ascending: true });
+  state.planos = data || [];
+  render();
+}
+
+function baixarComprovante(){
+  const c = state.comprovanteDados;
+  if(!c) return;
+
+  const html = `<!DOCTYPE html>
+<html lang="pt-BR"><head><meta charset="UTF-8"><title>Comprovante União Fight</title>
+<style>
+  body{ background:#0a0a0a; color:#f7f2e7; font-family:Arial, sans-serif; padding:40px; }
+  h1{ color:#f7b500; margin-bottom:2px; }
+  .linha{ display:flex; justify-content:space-between; padding:10px 0; border-bottom:1px solid #333; max-width:400px; }
+</style></head><body>
+  <h1>União Fight</h1>
+  <p>Comprovante de pagamento</p>
+  <div class="linha"><span>Aluno</span><span>${c.nome}</span></div>
+  <div class="linha"><span>Plano</span><span>${c.plano}</span></div>
+  <div class="linha"><span>Valor</span><span>${formatarPreco(c.preco)}</span></div>
+  <div class="linha"><span>Método</span><span>${nomeMetodoPagamento(c.metodo)}</span></div>
+  <div class="linha"><span>Data do pagamento</span><span>${c.data.toLocaleDateString('pt-BR')}</span></div>
+  <div class="linha"><span>Vencimento mensal</span><span>Todo dia ${c.diaVencimento}</span></div>
+</body></html>`;
+
+  const blob = new Blob([html], { type: 'text/html' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'comprovante-uniao-fight.html';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 async function carregarCronograma(){
@@ -1070,6 +1405,8 @@ async function abrirPessoa(id){
   const mapa = {};
   (data || []).forEach(p => { mapa[p.data] = p; });
   state.pessoaPresencas = mapa;
+
+  if(!state.planos.length) await carregarPlanos();
 
   go('admin-pessoa');
 }
@@ -1211,6 +1548,21 @@ function attachHandlers(){
       atualizarEquipeAprovada();
     });
   }
+
+  const finFiltroUnidade = document.getElementById('fin-filtro-unidade');
+  if(finFiltroUnidade){
+    finFiltroUnidade.addEventListener('change', ()=>{
+      state.finFiltroUnidade = finFiltroUnidade.value;
+      render();
+    });
+  }
+  const finFiltroStatus = document.getElementById('fin-filtro-status');
+  if(finFiltroStatus){
+    finFiltroStatus.addEventListener('change', ()=>{
+      state.finFiltroStatus = finFiltroStatus.value;
+      render();
+    });
+  }
 }
 
 async function handleAction(action, id){
@@ -1292,13 +1644,20 @@ async function handleAction(action, id){
       return render();
     }
 
-    const { error: perfilError } = await supabaseClient.from('profiles').insert({
+    const { data: perfilInserido, error: perfilError } = await supabaseClient.from('profiles').insert({
       id: data.user.id,
       nome, data_nascimento: nasc, unidade, modalidades, papel,
       status: 'pendente'
-    });
+    }).select().single();
 
     if(perfilError){ state.error='Erro ao salvar seu perfil: ' + perfilError.message; return render(); }
+
+    state.currentUser = perfilInserido;
+
+    if(papel === 'aluno'){
+      await carregarPlanos();
+      return go('pagamento');
+    }
     return go('pending');
   }
 
@@ -1403,12 +1762,16 @@ async function handleAction(action, id){
     document.querySelectorAll('.pessoa-grad-select').forEach(sel=>{
       graduacoes[sel.dataset.modalidade] = sel.value;
     });
+    const planoEl = document.getElementById('pessoa-plano');
+    const plano_id = planoEl ? (planoEl.value || null) : undefined;
 
     if(!nome || !unidade || modalidades.length===0){ state.error='Preencha nome, unidade e ao menos uma modalidade.'; return render(); }
 
-    const { data: atualizado, error } = await supabaseClient.from('profiles').update({
-      nome, data_nascimento: nasc || null, unidade, modalidades, papel, status, graduacoes
-    }).eq('id', id).select().single();
+    const dadosUpdate = { nome, data_nascimento: nasc || null, unidade, modalidades, papel, status, graduacoes };
+    if(plano_id !== undefined) dadosUpdate.plano_id = plano_id;
+
+    const { data: atualizado, error } = await supabaseClient.from('profiles').update(dadosUpdate)
+      .eq('id', id).select().single();
 
     if(error){ state.error = 'Erro ao salvar: ' + error.message; return render(); }
 
@@ -1422,6 +1785,7 @@ async function handleAction(action, id){
 
   if(action==='go-editar-perfil'){
     state.editarPerfilModalidades = [...(state.currentUser.modalidades || [])];
+    if(!state.planos.length) await carregarPlanos();
     return go('editar-perfil');
   }
 
@@ -1539,6 +1903,168 @@ async function handleAction(action, id){
       state.comunicadoAtual = state.comunicadosNaoLidos[0] || null;
     }
     return render();
+  }
+
+  if(action==='escolher-plano'){
+    state.planoEscolhido = id;
+    state.error = '';
+    return render();
+  }
+
+  if(action==='pagar'){
+    if(!state.planoEscolhido){ state.error = 'Escolha um plano primeiro.'; return render(); }
+    const metodo = id;
+    const plano = state.planos.find(p=>p.id===state.planoEscolhido);
+
+    if(metodo === 'liberacao_mestre'){
+      const { error } = await supabaseClient.rpc('registrar_pagamento_proprio', {
+        p_plano_id: state.planoEscolhido,
+        p_status_pagamento: 'liberacao_mestre',
+        p_metodo_pagamento: 'liberacao_mestre',
+        p_dia_vencimento: null
+      });
+      if(error){ state.error = 'Erro: ' + error.message; return render(); }
+      state.currentUser.plano_id = state.planoEscolhido;
+      state.currentUser.status_pagamento = 'liberacao_mestre';
+      state.currentUser.metodo_pagamento = 'liberacao_mestre';
+      return go('pending');
+    }
+
+    // Simula o processamento do pagamento (protótipo visual - sem gateway real ainda)
+    state.pagamentoProcessando = true;
+    state.error = '';
+    render();
+    await new Promise(resolve => setTimeout(resolve, 1600));
+
+    const diaVencimento = new Date().getDate();
+    const { error } = await supabaseClient.rpc('registrar_pagamento_proprio', {
+      p_plano_id: state.planoEscolhido,
+      p_status_pagamento: 'pago',
+      p_metodo_pagamento: metodo,
+      p_dia_vencimento: diaVencimento
+    });
+    state.pagamentoProcessando = false;
+
+    if(error){ state.error = 'Erro: ' + error.message; return render(); }
+
+    state.currentUser.plano_id = state.planoEscolhido;
+    state.currentUser.status_pagamento = 'pago';
+    state.currentUser.metodo_pagamento = metodo;
+    state.currentUser.dia_vencimento = diaVencimento;
+
+    state.comprovanteDados = {
+      nome: state.currentUser.nome,
+      plano: plano.nome,
+      preco: plano.preco,
+      metodo,
+      data: new Date(),
+      diaVencimento
+    };
+    return render();
+  }
+
+  if(action==='baixar-comprovante'){
+    baixarComprovante();
+    return;
+  }
+
+  if(action==='go-pending'){
+    // Se a pessoa já estava aprovada (pagando a mensalidade recorrente), volta pro
+    // próprio painel. Se ainda é o primeiro cadastro, segue pra tela de "aguardando".
+    state.comprovanteDados = null;
+    return go(state.currentUser.status === 'aprovado' ? telaDoUsuarioAgora() : 'pending');
+  }
+
+  if(action==='go-pagar-mensalidade'){
+    if(!state.planos.length) await carregarPlanos();
+    state.error = '';
+    return go('pagar-mensalidade');
+  }
+
+  if(action==='voltar-pagar-mensalidade'){
+    return go('student');
+  }
+
+  if(action==='pagar-mensal'){
+    const metodo = id;
+    const u = state.currentUser;
+    const plano = state.planos.find(p=>p.id===u.plano_id);
+    if(!plano){ state.error = 'Nenhum plano definido. Fale com o administrador.'; return render(); }
+
+    state.pagamentoProcessando = true; state.error = ''; render();
+    await new Promise(resolve => setTimeout(resolve, 1600));
+
+    const diaVencimento = u.dia_vencimento || new Date().getDate();
+    const { error } = await supabaseClient.rpc('registrar_pagamento_proprio', {
+      p_plano_id: plano.id,
+      p_status_pagamento: 'pago',
+      p_metodo_pagamento: metodo,
+      p_dia_vencimento: diaVencimento
+    });
+    state.pagamentoProcessando = false;
+
+    if(error){ state.error = 'Erro: ' + error.message; return render(); }
+
+    state.currentUser.status_pagamento = 'pago';
+    state.currentUser.metodo_pagamento = metodo;
+    state.currentUser.dia_vencimento = diaVencimento;
+
+    state.comprovanteDados = {
+      nome: u.nome, plano: plano.nome, preco: plano.preco, metodo,
+      data: new Date(), diaVencimento
+    };
+    return render();
+  }
+
+  if(action==='go-financeiro'){
+    if(!state.planos.length) await carregarPlanos();
+    return go('admin-financeiro');
+  }
+
+  if(action==='voltar-admin-financeiro'){
+    return go('admin');
+  }
+
+  if(action==='go-mensalidades'){
+    if(!state.planos.length) await carregarPlanos();
+    return go('admin-mensalidades');
+  }
+
+  if(action==='voltar-financeiro-mensalidades'){
+    return go('admin-financeiro');
+  }
+
+  if(action==='go-planos'){
+    await carregarPlanos();
+    return go('admin-planos');
+  }
+
+  if(action==='voltar-admin-planos'){
+    return go('admin-financeiro');
+  }
+
+  if(action==='editar-plano'){
+    state.planoEditando = state.planos.find(p=>p.id===id) || null;
+    state.error = '';
+    return go('plano-form');
+  }
+
+  if(action==='salvar-plano'){
+    const nome = document.getElementById('plano-nome').value.trim();
+    const preco = parseFloat(document.getElementById('plano-preco').value);
+    const descricao = document.getElementById('plano-descricao').value.trim();
+
+    if(!nome || isNaN(preco) || preco < 0){ state.error = 'Preencha nome e um preço válido.'; return render(); }
+
+    state.loading = true; render();
+    const { error } = await supabaseClient.from('planos').update({ nome, preco, descricao }).eq('id', id);
+    state.loading = false;
+
+    if(error){ state.error = 'Erro ao salvar: ' + error.message; return render(); }
+
+    state.planoEditando = null;
+    await carregarPlanos();
+    return go('admin-planos');
   }
 
   if(action==='go-cronograma-admin'){
